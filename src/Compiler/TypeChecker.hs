@@ -27,11 +27,11 @@ inferProgram :: Syntax.Program -> Either String Syntax.Program
 inferProgram (Syntax.Program xs) = liftM Syntax.Program (mapM inferDec xs)
 
 inferDec :: Syntax.Dec -> Either String Syntax.Dec
-inferDec (Syntax.FunDec pos s ss ps ty t) = do t' <- withPats tys' ps $
-                                                       inferTerm gammaEmpty sigmaEmpty ty' t
+inferDec (Syntax.FunDec pos s ss ps ty t) = do t' <- inferTerm g sigmaEmpty ty' t
                                                return $ Syntax.FunDec pos s ss ps ty t'
   where tys' = map Syntax.patType ps
         ty' = Syntax.typType ty
+        g = gammaWithPats g ps tys'
 
 -- | Metavariables
 type Sigma = IntMap Type.Type
@@ -39,13 +39,21 @@ type Sigma = IntMap Type.Type
 -- | Local variables
 type Gamma = [(String, Type.Type)]
 
-withPats :: [Type.Type] -> [Syntax.Pat] -> Either String Syntax.Term -> Either String Syntax.Term
-withPats [] [] m = m
-withPats (t:ts) (p:ps) m = withPat t p (withPats ts ps m)
-withPats _ _ _ = error "Compiler.TypeChecker.withPats: impossible"
+gammaWithPats :: Gamma -> [Syntax.Pat] -> [Type.Type] -> Gamma
+gammaWithPats g []     []     = g
+gammaWithPats g (p:ps) (ty:tys) = gammaWithPats (gammaWithPat g p ty) ps tys
+gammaWithPats g _      _      = error "Compiler.TypeChecker.withPats: impossible"
 
-withPat :: Type.Type -> Syntax.Pat -> Either String Syntax.Term -> Either String Syntax.Term
-withPat _ (Syntax.UnitPat _) m = m
+-- Do I just want to add the metavariable?
+
+gammaWithPat :: Gamma -> Syntax.Pat -> Type.Type -> Gamma
+gammaWithPat g (Syntax.AscribePat p _) ty = gammaWithPat g p ty
+gammaWithPat g (Syntax.LowerPat s)     ty = gammaBind g s ty
+gammaWithPat g (Syntax.TuplePat _ ps)  ty = case ty of
+                                              Type.Tuple tys -> gammaWithPats g ps tys
+                                              _ -> error "impossible"
+gammaWithPat g Syntax.UnderbarPat      ty = g
+gammaWithPat g (Syntax.UnitPat _)      ty = g
 
 -- The first thing we do is run typeCheckTerm, which gets us the table of
 -- metavariables. We then run updateTerm, which uses the table to replace
@@ -59,7 +67,10 @@ inferTerm g s ty t = do (ty, s) <- typeCheckTerm g s ty t
 
 updateTerm :: Sigma -> Syntax.Term -> Syntax.Term
 updateTerm s (Syntax.ApplyTerm m t1 t2)   = Syntax.ApplyTerm (updateType s m) (updateTerm s t1) (updateTerm s t2)
+updateTerm s (Syntax.AscribeTerm p t ty)  = Syntax.AscribeTerm p (updateTerm s t) ty
+updateTerm s (Syntax.BindTerm m p t1 t2)  = Syntax.BindTerm (updateType s m) p (updateTerm s t1) (updateTerm s t2)
 updateTerm s (Syntax.VariableTerm p x)    = Syntax.VariableTerm p x
+updateTerm s (Syntax.SeqTerm t1 t2)       = Syntax.SeqTerm (updateTerm s t1) (updateTerm s t2)
 updateTerm s (Syntax.TupleTerm p ms xs)   = Syntax.TupleTerm p (map (updateType s) ms) (map (updateTerm s) xs)
 updateTerm s (Syntax.UnitTerm p)          = Syntax.UnitTerm p
 updateTerm s (Syntax.UpperTerm p ts ty x) = Syntax.UpperTerm p (map (updateType s) ts) (updateType s ty) x
@@ -81,6 +92,39 @@ sigmaGet s m = maybe Type.Unit id (sigmaLookup s m)
 gammaGet :: Gamma -> String -> Type.Type
 gammaGet g x = maybe (error "Compiler.TypeChecker.gammaGet") id (lookup x g)
 
+
+typeCheckPat :: Sigma -> Type.Type -> Syntax.Pat -> Either String (Type.Type, Sigma)
+typeCheckPat s ty (Syntax.AscribePat p ty2) =
+  case unify s ty (Syntax.typType ty2) of
+    Nothing -> Left undefined
+    Just (ty, s) -> typeCheckPat s ty p
+typeCheckPat s ty (Syntax.LowerPat x) = Right (ty, s)
+typeCheckPat s ty (Syntax.TuplePat tys ps) =
+  case unify s ty (Type.Tuple tys) of
+    Nothing -> Left undefined
+    Just (Type.Tuple tys, s) ->
+      case typeCheckPats s tys ps of
+        Left msg -> Left msg
+        Right (tys, s) -> Right (Type.Tuple tys, s)
+    Just (_, s) -> unreachable
+typeCheckPat s ty Syntax.UnderbarPat =
+  Right (ty, s)
+typeCheckPat s ty (Syntax.UnitPat _) =
+  case unify s ty Type.Unit of
+    Nothing -> Left undefined
+    Just (ty, s) -> Right (ty, s)
+
+typeCheckPats :: Sigma -> [Type.Type] -> [Syntax.Pat] -> Either String ([Type.Type], Sigma)
+typeCheckPats s [] [] = Right ([], s)
+typeCheckPats s (ty:tys) (p:ps) =
+  case typeCheckPat s ty p of
+    Left msg -> Left msg
+    Right (ty, s) ->
+      case typeCheckPats s tys ps of
+        Left msg -> Left msg
+        Right (tys, s) -> Right (ty:tys, s)
+typeCheckPats s _ _ = unreachable
+
 -- We pass in an expected type forward to catch type errors as soon as possible.
 
 typeCheckTerm :: Gamma -> Sigma -> Type.Type -> Syntax.Term -> Either String (Type.Type, Sigma)
@@ -93,6 +137,25 @@ typeCheckTerm g s ty (Syntax.ApplyTerm m t1 t2) =
         Left msg -> Left msg
         Right (ty1, s) -> return (updateType s ty2, s)
     Right (_, s) -> unreachable
+
+typeCheckTerm g s ty (Syntax.AscribeTerm p t ty2) =
+  let ty2' = Syntax.typType ty2
+   in case unify s ty ty2' of
+        Nothing -> errorMsg p ty ty2'
+        Just (ty, s) -> typeCheckTerm g s ty t
+
+typeCheckTerm g s ty (Syntax.BindTerm tyP p t1 t2) =
+  case typeCheckPat s tyP p of
+    Left msg -> Left msg
+    Right (tyP, s) ->
+      case typeCheckTerm g s tyP t1 of
+        Left msg -> Left msg
+        Right (ty1, s) -> typeCheckTerm (gammaWithPat g p ty1) s (updateType s ty) t2
+
+typeCheckTerm g s ty (Syntax.SeqTerm t1 t2) =
+  case typeCheckTerm g s Type.Unit t1 of
+    Left msg -> Left msg
+    Right (_, s) -> typeCheckTerm g s ty t2
 
 typeCheckTerm g s ty (Syntax.TupleTerm p ms xs) =
   case unify s ty (Type.Tuple ms) of
@@ -185,11 +248,18 @@ unify s (Type.Metavariable x1) (Type.Metavariable x2)
                                 Nothing -> Nothing
                                 Just (t3, s) -> Just (t3, sigmaBind (sigmaBind s x1 t3) x2 t3)
 unify s (Type.Metavariable x1) t2 =
-  do t1 <- sigmaLookup s x1
-     (t3, s) <- unify s t1 t2
-     return (t3, sigmaBind s x1 t3)
+  case sigmaLookup s x1 of
+    Nothing -> Just (t2, sigmaBind s x1 t2)
+    Just t1 ->
+      case unify s t1 t2 of
+        Nothing -> Nothing
+        Just (t3, s) -> Just (t3, sigmaBind s x1 t3)
 unify s t1 (Type.Metavariable x2) =
   unify s (Type.Metavariable x2) t1
+unify s (Type.Tuple tys1) (Type.Tuple tys2) =
+  case unifys s tys1 tys2 of
+    Nothing -> Nothing
+    Just (tys3, s) -> Just (Type.Tuple tys3, s)
 unify s Type.Unit Type.Unit =
   Just (Type.Unit, s)
 unify s (Type.Variable x1) (Type.Variable x2) | x1 == x2 = return (Type.Variable x1, s)
@@ -224,6 +294,9 @@ sigmaBind s x ty =
 
 gammaEmpty :: Gamma
 gammaEmpty = []
+
+gammaBind :: Gamma -> String -> Type.Type -> Gamma
+gammaBind g x ty = (x, ty) : g
 
 unreachable :: a
 unreachable = error "unreachable"

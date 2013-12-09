@@ -152,13 +152,20 @@ leftBracket = do
     _ -> failure
 
 lower :: AmbiguousParser Syntax.Ident
-lower = error "lower"
+lower = do
+  t <- token
+  case t of
+    LowerToken x -> return x
+    _ -> failure
 
 comma :: AmbiguousParser ()
-comma = error "comma"
+comma = isToken CommaToken
 
 colon :: AmbiguousParser ()
 colon = isToken ColonToken
+
+rightArrow :: AmbiguousParser ()
+rightArrow = isToken RightArrowToken
 
 leftParen :: AmbiguousParser ()
 leftParen = isToken LeftParenToken
@@ -168,6 +175,13 @@ rightParen = isToken RightParenToken
 
 rightBracket :: AmbiguousParser ()
 rightBracket = error "right bracket"
+
+keyword :: String -> AmbiguousParser ()
+keyword s1 = do
+  x <- token
+  case x of
+    LowerToken s2 | s1 == s2 -> return ()
+    _ -> failure
 
 funDec :: AmbiguousParser Syntax.Dec
 funDec = do
@@ -183,7 +197,7 @@ funDec = do
   colon
   e4 <- typ0
   e5 <- withLocals (patsLocals e3) $
-          setRequirement 0 stm0
+          aligned 3 stm0
   return $ Syntax.FunDec pos e1 e2 e3 e4 e5
 
 withLocals :: [String] -> AmbiguousParser a -> AmbiguousParser a
@@ -192,54 +206,174 @@ withLocals xs p = p
 patsLocals :: [Syntax.Pat] -> [String]
 patsLocals _ = return []
 
-setRequirement :: Int -> AmbiguousParser a -> AmbiguousParser a
-setRequirement n p = p
-
 stm0 :: AmbiguousParser Syntax.Term
 stm0 = do
-  exp2
+  choice [ bindStm
+         , seqStm
+         , stm1
+         ]
 
-exp2 :: AmbiguousParser Syntax.Term
-exp2 = do
-  e <- exp3
-  choice [ applyExp e
+bindStm :: AmbiguousParser Syntax.Term
+bindStm = do
+  Syntax.Pos _ _ c <- position
+  keyword "bind"
+  p <- pat0
+  keyword "to"
+  t1 <- stm1
+  t2 <- aligned c stm0
+  return $ Syntax.BindTerm Type.Unit p t1 t2
+
+seqStm :: AmbiguousParser Syntax.Term
+seqStm = do
+  Syntax.Pos _ _ c <- position
+  t1 <- stm1
+  aligned c $ do
+    t2 <- stm0
+    return $ Syntax.SeqTerm t1 t2
+
+stm1 :: AmbiguousParser Syntax.Term
+stm1 = do
+  Syntax.Pos _ l _ <- position
+  line l term0
+
+term0 :: AmbiguousParser Syntax.Term
+term0 = do
+  e <- term1
+  choice [ ascribeTerm e
          , return e
          ]
 
-applyExp :: Syntax.Term -> AmbiguousParser Syntax.Term
-applyExp e1 = do
-  e2 <- exp4
-  choice [ applyExp (Syntax.ApplyTerm Type.Unit e1 e2)
-         , return (Syntax.ApplyTerm Type.Unit e1 e2)
+ascribeTerm :: Syntax.Term -> AmbiguousParser Syntax.Term
+ascribeTerm t = do
+  pos <- position
+  colon
+  ty <- typ0
+  return $ Syntax.AscribeTerm pos t ty
+
+term1 :: AmbiguousParser Syntax.Term
+term1 = term2
+
+term2 :: AmbiguousParser Syntax.Term
+term2 = do
+  e <- exp3
+  choice [ applyTerm e
+         , return e
+         ]
+
+applyTerm :: Syntax.Term -> AmbiguousParser Syntax.Term
+applyTerm t1 = do
+  t2 <- exp4
+  choice [ applyTerm (Syntax.ApplyTerm Type.Unit t1 t2)
+         , return (Syntax.ApplyTerm Type.Unit t1 t2)
          ]
 
 exp3 :: AmbiguousParser Syntax.Term
-exp3 = exp4
+exp3 = choice [ do pos <- position
+                   x <- lower
+                   return $ Syntax.VariableTerm pos x
+              , do pos <- position
+                   x <- upper
+                   return $ Syntax.UpperTerm pos [] Type.Unit x
+              , exp4
+              ]
 
 exp4 :: AmbiguousParser Syntax.Term
-exp4 =
+exp4 = do
   choice [ do pos <- position
               leftParen
               rightParen
               return $ Syntax.UnitTerm pos
          , do leftParen
-              e <- exp2
+              e <- term0
               rightParen
               return e
-         , do  pos <- position
-               x <- upper
-               return $ Syntax.UpperTerm pos [] Type.Unit x
+         , do pos <- position
+              leftParen
+              t <- term0
+              ts <- many1 $ comma >> term0
+              rightParen
+              return $ Syntax.TupleTerm pos (map (\ _ -> Type.Unit) (t:ts)) (t:ts)
+         ]
+
+pat0 :: AmbiguousParser Syntax.Pat
+pat0 = do
+  p <- pat1
+  choice [ do colon
+              ty <- typ0
+              return $ Syntax.AscribePat p ty
+         , return p
+         ]
+
+pat1 :: AmbiguousParser Syntax.Pat
+pat1 = pat2
+
+pat2 :: AmbiguousParser Syntax.Pat
+pat2 =
+  choice [ do t <- token
+              case t of
+                UnderbarToken -> return Syntax.UnderbarPat
+                _ -> failure
+         , do x <- lower
+              return $ Syntax.LowerPat x
+         , pat3
          ]
 
 pat3 :: AmbiguousParser Syntax.Pat
-pat3 = do
-  pos <- position
-  leftParen
-  rightParen
-  return $ Syntax.UnitPat pos
+pat3 =
+  choice [ do pos <- position
+              leftParen
+              rightParen
+              return $ Syntax.UnitPat pos
+         , do leftParen
+              p <- pat0
+              ps <- many1 $ comma >> pat0
+              rightParen
+              return $ Syntax.TuplePat (map (\ _ -> Type.Unit) (p:ps)) (p:ps)
+         , do leftParen
+              p <- pat0
+              rightParen
+              return p
+         ]
 
 typ0 :: AmbiguousParser Syntax.Typ
 typ0 = do
+  ty <- typ1
+  tys <- many $ rightArrow >> typ1
+  return $ foldl Syntax.ArrowTyp ty tys
+
+typ1 :: AmbiguousParser Syntax.Typ
+typ1 = do
+  choice [ lowerTyp
+         , tupleTyp
+         , unitTyp
+         , upperTyp
+         , do leftParen
+              ty <- typ0
+              rightParen
+              return ty
+         ]
+
+lowerTyp :: AmbiguousParser Syntax.Typ
+lowerTyp = liftM Syntax.LowerTyp lower
+
+
+tupleTyp :: AmbiguousParser Syntax.Typ
+tupleTyp = do
+  leftParen
+  ty <- typ0
+  tys <- many1 $ comma >> typ0
+  rightParen
+  return $ Syntax.TupleTyp (ty:tys)
+
+unitTyp :: AmbiguousParser Syntax.Typ
+unitTyp = do
+  pos <- position
+  leftParen
+  rightParen
+  return $ Syntax.UnitTyp pos
+
+upperTyp :: AmbiguousParser Syntax.Typ
+upperTyp = do
   pos <- position
   x <- upper
   return $ Syntax.UpperTyp pos x

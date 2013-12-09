@@ -50,6 +50,16 @@ withTypes gs m = check m
         check (LookupTypeVariable s k)  = check $ k (lookupJust s gs)
         check (LookupValueVariable s k) = LookupValueVariable s (check . k)
 
+withLower :: String -> Int -> Result a -> Result a
+withLower d d' m = check m
+  where check (Normal x)                = Normal x
+        check (Gen k)                   = Gen (check . k)
+        check (LookupUpper s k)         = LookupUpper s (check . k)
+        check (LookupTypeVariable s k)  = LookupTypeVariable s (check . k)
+        check (LookupValueVariable s k)
+                            | s == d    = check $ k d'
+                            | otherwise = LookupValueVariable s (check . k)
+
 -- data Program = Program [(TagIdent, Tag)] [(VariantIdent, Variant)] [(FunctionIdent, Function)] FunctionIdent
 
 elaborate :: Syntax.Program -> Lambda.Program
@@ -86,10 +96,27 @@ elaborateCurried (p:ps) e = do d <- Gen Normal
                                return $ Lambda.LambdaTerm d t e'
 
 elaboratePat :: Lambda.ValueIdent -> Syntax.Pat -> Result Lambda.Term -> Result Lambda.Term
-elaboratePat d (Syntax.UnitPat _) m = m
+elaboratePat d (Syntax.AscribePat p ty) m = elaboratePat d p m
+elaboratePat d (Syntax.LowerPat s)      m = withLower s d m
+elaboratePat d (Syntax.TuplePat _ ps)   m = do ds <- mapM gen ps
+                                               t <- elaboratePats ds ps m
+                                               return $ Lambda.UntupleTerm ds (Lambda.VariableTerm d) t
+elaboratePat d Syntax.UnderbarPat       m = m
+elaboratePat d (Syntax.UnitPat _)       m = m
+
+elaboratePats :: [Lambda.ValueIdent] -> [Syntax.Pat] -> Result Lambda.Term -> Result Lambda.Term
+elaboratePats []     []     m = m
+elaboratePats (d:ds) (p:ps) m = elaboratePat d p (elaboratePats ds ps m)
+elaboratePats _      _      m = impossible
 
 elaborateTerm :: Syntax.Term -> Result Lambda.Term
 elaborateTerm (Syntax.ApplyTerm _ t1 t2)     = do { t1' <- elaborateTerm t1; t2' <- elaborateTerm t2; return $ Lambda.ApplyTerm t1' t2' }
+elaborateTerm (Syntax.AscribeTerm _ t _)     = elaborateTerm t
+elaborateTerm (Syntax.BindTerm _ p t1 t2)    = do d <- gen ()
+                                                  t1' <- elaborateTerm t1
+                                                  t2' <- elaboratePat d p $ elaborateTerm t2
+                                                  return $ Lambda.BindTerm d t1' t2'
+elaborateTerm (Syntax.SeqTerm t1 t2)         = do { d <- gen (); t1' <- elaborateTerm t1; t2' <- elaborateTerm t2; return $ Lambda.BindTerm d t1' t2' }
 elaborateTerm (Syntax.TupleTerm pos tys es)  = do { es' <- mapM elaborateTerm es; return $ Lambda.TupleTerm es' }
 elaborateTerm (Syntax.UnitTerm pos)          = return Lambda.UnitTerm
 elaborateTerm (Syntax.UpperTerm pos tys _ s) = do { d <- LookupUpper s Normal; tys' <- mapM elaborateType tys; return $ Lambda.TypeApplyTerm d tys' }
