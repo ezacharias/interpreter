@@ -1,0 +1,3 @@
+-- The minimial program.
+Main() : Output
+  Exit

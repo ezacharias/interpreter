@@ -5,7 +5,38 @@ extensions: {}
 environment: ghc-7.4.2-stable-13.09
 cabal-file: project.cabal
 modules:
+  Compiler.Syntax:
+    filename: src/Compiler/Syntax.hs
+  Compiler.Lambda:
+    filename: src/Compiler/Lambda.hs
+  Compiler.Parser:
+    filename: src/Compiler/Parser.hs
+  Compiler.Type:
+    filename: src/Compiler/Type.hs
+  Compiler.Meta:
+    filename: src/Compiler/Meta.hs
+  Compiler.Driver:
+    filename: src/Compiler/Driver.hs
+  Compiler.TypeChecker:
+    filename: src/Compiler/TypeChecker.hs
+  Compiler.Tokenizer:
+    filename: src/Compiler/Tokenizer.hs
+  Compiler.Elaborator:
+    filename: src/Compiler/Elaborator.hs
+  Compiler.Interpreter:
+    filename: src/Compiler/Interpreter.hs
+  Main(tests/hunit.hs):
+    filename: tests/hunit.hs
+  Compiler.Token:
+    filename: src/Compiler/Token.hs
+  Compiler.TokenParser:
+    filename: src/Compiler/TokenParser.hs
   Main(src/Main.hs):
     filename: src/Main.hs
 version: 1
-ghc-args: []
+extra-packages: ''
+ghc-args:
+- -Wall
+- -fno-warn-name-shadowing
+- -fno-warn-unused-matches
+- -fno-warn-unused-binds

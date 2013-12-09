@@ -1,0 +1,97 @@
+
+sum Void
+
+-- The idea behind `Abort` is it permits us to implement exceptions.
+
+sum Exception
+  Exception(s : String)
+
+tag Error : Tag⟦Exception, Void⟧
+
+Raise⟦a⟧(e : Exception) : a
+  in Unreachable do
+    Throw(Error)(Exception)
+
+Handle⟦a⟧(f : () ⟶ a)(g : Exception ⟶ a) : a
+  for (x : Exception, _ : Void ⟶ a) in Catch(Error)(f) do
+    g(x)
+
+Stream⟦a, b, c⟧(t : Tag⟦a, b⟧)(f : () ⟶ c) : Stream⟦a, b, c⟧
+  Handle(t)(End ∘ f)(More)
+
+-- Throw(tag : Tag⟦a, b⟧)(x : a) : b
+-- Catch(tag : Tag⟦a, b⟧)(f : () ⟶ c)(g : Result⟦a, b, c⟧ -> d) ⟶ d
+
+sum Output
+  Exit
+  Write(s : String)(r : Output)
+  Continue(k : Input ⟶ Output)
+
+sum Stream⟦a, b, c⟧
+  More(x : a, d : b ⟶ Stream⟦a, b, c⟧)
+  End(x : c)
+
+tag Output : Tag⟦String, ()⟧
+
+Main() : Output
+  in IO do
+    bind x to Nil
+    Snoc!(x, 2)
+    Snoc!(x, 1)
+    Put(x)
+
+-- This is perfectly OK. The runtime will correctly box and unbox the type.
+
+sum Dynamic
+  Dynamic⟦a⟧(x : a)
+
+Cast⟦a⟧(d : Dynamic) : a
+  match d
+    Dynamic⟦b⟧(x : a)
+      x
+    Dynamic⟦b⟧(x : b)
+      Raise(Nothing)
+
+Grab(d : Dynamic) : Int
+  case d
+    Dynamic⟦a⟧(x : Int)
+      x
+    Dynamic⟦a⟧(x : a)
+      0
+
+sum Maybe⟦a⟧
+  Nothing
+  Something(x : a)
+
+sum Foo
+  Foo⟦a⟧(x : a, f : a ⟶ String)
+
+Bar(Foo⟦a⟧(x, f)) : String
+  f(x)
+
+IO(f : () ⟶ ()) : Output
+  bind it to in Catch(Output) do
+    f()
+    Exit
+  for (x, d) in it do
+    for _ in (Write(x) ∘ Continue) do
+      d()
+
+sum Either⟦a, b⟧
+  Left(x : a)
+  Right(x : b)
+
+Put⟦a⟧(x : a) : ()
+  Throw(Output)(Show(x))
+
+sum List⟦a⟧
+  Nil
+  Cons(x : a, xs : List⟦a⟧)
+
+Snoc⟦a⟧(xs : List⟦a⟧, x : a) : List⟦a⟧
+  Cons(x, xs)
+
+-- Foo(x : ⟦a⟧(List⟦a⟧ ⟶ List⟦a⟧)) : ⟦b⟧(List⟦b⟧ ⟶ List⟦b⟧)
+
+Identity⟦a⟧(x : a) : a
+  x

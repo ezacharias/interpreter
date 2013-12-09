@@ -1,7 +1,14 @@
 -- | Main entry point to the application.
-module Main where
+module Main (main) where
 
--- | The main entry point.
+import           System.Environment
+
+import           Compiler.Driver
+
 main :: IO ()
-main = do
-    putStrLn "Welcome to FP Haskell Center!"
+main = drive . interpreter =<< getFilename
+
+getFilename :: IO String
+getFilename = getArgs >>= check
+  where check [filename] = return filename
+        check _ = error "Incorrect number of arguments."
