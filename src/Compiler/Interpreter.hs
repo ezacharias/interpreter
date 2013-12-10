@@ -115,7 +115,7 @@ withDynamicEnvironment xs ys (GetValueEnvironment k) = withDynamicEnvironment xs
 eval :: Term -> Result Value
 eval (ApplyTerm e1 e2)          = do { v1 <- eval e1; v2 <- eval e2; (closureValue v1) v2 }
 eval (BindTerm d e1 e2)         = do { v1 <- eval e1; bind [d] [v1] e2 }
-eval (CaseTerm e cs)            = do { v <- eval e; evalCase cs (variantValue v) }
+-- eval (CaseTerm e cs)            = do { v <- eval e; evalCase cs (variantValue v) }
 eval (CatchTerm e1 d e2 e3)     = do { tag <- eval e1; evalCatchTerm (tagValue tag) d e2 (eval e3) }
 eval (ConstructorTerm _ _ d es) = mapM eval es >>= Normal . VariantValue d
 eval (IsEqualTerm t e1 e2)      = do { t' <- evalType t; v1 <- eval e1; v2 <- eval e2; evalIsEqualTerm t' v1 v2 }
@@ -123,11 +123,18 @@ eval (LambdaTerm d t e)         = Normal $ ClosureValue (\ v -> bind [d] [v] e)
 eval (ProtectTerm e1 e2)        = protect e2 (eval e1)
 eval (StringTerm s)             = Normal $ StringValue s
 eval (TagTerm d)                = Normal $ TagValue d
+eval (TestTerm t1 i1 ds t2 t3)  = do t1' <- eval t1
+                                     case t1' of
+                                       VariantValue i2 vs
+                                         | i1 == i2  -> bind ds vs t2
+                                         | otherwise -> eval t3
+                                       _ -> error "unreachable"
 eval (ThrowTerm e1 e2)          = do { v1 <- eval e1; v2 <- eval e2; Escape (tagValue v1) v2 Normal }
 eval (TupleTerm ts)             = mapM eval ts >>= Normal . TupleValue
 eval (TypeApplyTerm d ts)       = do { ts' <- mapM evalType ts; LookupFunction d $ typeApplyTerm ts' }
 eval (ShowTerm t e)             = do { t' <- evalType t; v <- eval e; evalShowValue t' v }
 eval UnitTerm                   = Normal UnitValue
+eval (Unreachable _)            = error "Interpreter: Unreachable"
 eval (UntupleTerm ds e1 e2)     = do { v <- eval e1; bind ds (tupleValue v) e2 }
 eval (VariableTerm d)           = GetValueEnvironment (Normal . lookupJust d)
 

@@ -1,7 +1,10 @@
--- Function calls.
 
 Main() : Output
   Foo(Exit)
 
-Foo[a](x : a) : a
-  x
+Foo(x : Output) : Output
+  case x
+    _
+      Unreachable
+    Exit
+      x

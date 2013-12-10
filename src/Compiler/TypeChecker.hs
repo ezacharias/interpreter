@@ -54,6 +54,8 @@ gammaWithPat g (Syntax.TuplePat _ ps)  ty = case ty of
                                               _ -> error "impossible"
 gammaWithPat g Syntax.UnderbarPat      ty = g
 gammaWithPat g (Syntax.UnitPat _)      ty = g
+gammaWithPat g (Syntax.UpperPat _ tys _ _ ps)
+                                       ty = gammaWithPats g ps tys
 
 -- The first thing we do is run typeCheckTerm, which gets us the table of
 -- metavariables. We then run updateTerm, which uses the table to replace
@@ -69,6 +71,8 @@ updateTerm :: Sigma -> Syntax.Term -> Syntax.Term
 updateTerm s (Syntax.ApplyTerm m t1 t2)   = Syntax.ApplyTerm (updateType s m) (updateTerm s t1) (updateTerm s t2)
 updateTerm s (Syntax.AscribeTerm p t ty)  = Syntax.AscribeTerm p (updateTerm s t) ty
 updateTerm s (Syntax.BindTerm m p t1 t2)  = Syntax.BindTerm (updateType s m) p (updateTerm s t1) (updateTerm s t2)
+updateTerm s (Syntax.CaseTerm m t rs)     = Syntax.CaseTerm (updateType s m) (updateTerm s t) (map (updateRule s) rs)
+                                            where updateRule s (p, t) = (p, updateTerm s t)
 updateTerm s (Syntax.VariableTerm p x)    = Syntax.VariableTerm p x
 updateTerm s (Syntax.SeqTerm t1 t2)       = Syntax.SeqTerm (updateTerm s t1) (updateTerm s t2)
 updateTerm s (Syntax.TupleTerm p ms xs)   = Syntax.TupleTerm p (map (updateType s) ms) (map (updateTerm s) xs)
@@ -94,11 +98,14 @@ gammaGet g x = maybe (error "Compiler.TypeChecker.gammaGet") id (lookup x g)
 
 
 typeCheckPat :: Sigma -> Type.Type -> Syntax.Pat -> Either String (Type.Type, Sigma)
+
 typeCheckPat s ty (Syntax.AscribePat p ty2) =
   case unify s ty (Syntax.typType ty2) of
     Nothing -> Left undefined
     Just (ty, s) -> typeCheckPat s ty p
+
 typeCheckPat s ty (Syntax.LowerPat x) = Right (ty, s)
+
 typeCheckPat s ty (Syntax.TuplePat tys ps) =
   case unify s ty (Type.Tuple tys) of
     Nothing -> Left undefined
@@ -107,12 +114,22 @@ typeCheckPat s ty (Syntax.TuplePat tys ps) =
         Left msg -> Left msg
         Right (tys, s) -> Right (Type.Tuple tys, s)
     Just (_, s) -> unreachable
+
 typeCheckPat s ty Syntax.UnderbarPat =
   Right (ty, s)
+
 typeCheckPat s ty (Syntax.UnitPat _) =
   case unify s ty Type.Unit of
     Nothing -> Left undefined
     Just (ty, s) -> Right (ty, s)
+
+typeCheckPat s ty (Syntax.UpperPat pos tys ty2 x ps) =
+  case unify s ty ty2 of
+    Nothing -> errorMsg pos ty ty2
+    Just (ty, s) ->
+      case typeCheckPats s tys ps of
+        Left msg -> Left msg
+        Right (tys, s) -> Right (updateType s ty, s)
 
 typeCheckPats :: Sigma -> [Type.Type] -> [Syntax.Pat] -> Either String ([Type.Type], Sigma)
 typeCheckPats s [] [] = Right ([], s)
@@ -151,6 +168,26 @@ typeCheckTerm g s ty (Syntax.BindTerm tyP p t1 t2) =
       case typeCheckTerm g s tyP t1 of
         Left msg -> Left msg
         Right (ty1, s) -> typeCheckTerm (gammaWithPat g p ty1) s (updateType s ty) t2
+
+typeCheckTerm g s ty (Syntax.CaseTerm ty2 t rs) =
+  case typeCheckRulePats s ty2 rs of
+    Left msg -> Left msg
+    Right (ty2, s) ->
+      case typeCheckTerm g s ty2 t of
+        Left msg -> Left msg
+        Right (ty2, s) -> typeCheckRules g s ty ty2 rs
+  where typeCheckRulePats s ty [] = Right (ty, s)
+        typeCheckRulePats s ty ((p, _) : rs) =
+          case typeCheckPat s ty p of
+            Left msg -> Left msg
+            Right (ty, s) -> typeCheckRulePats s ty rs
+        typeCheckRules g s ty1 ty2 [] = Right (ty1, s)
+        typeCheckRules g s ty1 ty2 (r:rs) =
+          case typeCheckRule g s ty1 ty2 r of
+            Left msg -> Left msg
+            Right (ty1, s) -> typeCheckRules g s ty1 ty2 rs
+        typeCheckRule g s ty1 ty2 (p, t) =
+          typeCheckTerm (gammaWithPat g p ty2) s ty1 t
 
 typeCheckTerm g s ty (Syntax.SeqTerm t1 t2) =
   case typeCheckTerm g s Type.Unit t1 of

@@ -15,7 +15,7 @@ data Dec = FunDec Pos String [String] [Pat] Typ Term
 data Term = ApplyTerm Type.Type Term Term
           | AscribeTerm Pos Term Typ
           | BindTerm Type.Type Pat Term Term
-       -- | CaseTerm Term [(Pat, Term)]
+          | CaseTerm Type.Type Term [Rule]
           | SeqTerm Term Term
           | TupleTerm Pos [Type.Type] [Term]
           | UnitTerm Pos
@@ -23,12 +23,14 @@ data Term = ApplyTerm Type.Type Term Term
           | VariableTerm Pos String
             deriving (Eq, Show)
 
+type Rule = (Pat, Term)
+
 data Pat = AscribePat Pat Typ
          | LowerPat String
          | TuplePat [Type.Type] [Pat]
          | UnderbarPat
          | UnitPat Pos
-      -- | UpperPat String [Pat]
+         | UpperPat Pos [Type.Type] Type.Type String [Pat]
            deriving (Eq, Show)
 
 data Typ = ArrowTyp Typ Typ
@@ -53,6 +55,7 @@ patType (LowerPat s)      = error "Compiler.Syntax.patType"
 patType (TuplePat _ ps)   = Type.Tuple (map patType ps)
 patType UnderbarPat       = error "Compiler.Syntax.patType"
 patType (UnitPat _)       = Type.Unit
+patType (UpperPat _ _ _ _ _) = undefined
 
 typType :: Typ -> Type.Type
 typType (ArrowTyp ty1 ty2) = Type.Arrow (typType ty1) (typType ty2)

@@ -41,7 +41,7 @@ data Type = ArrowType Type Type
 
 data Term = ApplyTerm Term Term
           | BindTerm ValueIdent Term Term
-          | CaseTerm Term [([ValueIdent], Term)]
+       -- | CaseTerm Term [([ValueIdent], Term)]
           | CatchTerm Term ValueIdent Term Term
           | ConstructorTerm VariantIdent [Type] ConstructorIndex [Term]
           | IsEqualTerm Type Term Term
@@ -50,10 +50,12 @@ data Term = ApplyTerm Term Term
           | ShowTerm Type Term
           | StringTerm String
           | TagTerm TagIdent
+          | TestTerm Term ConstructorIndex [ValueIdent] Term Term
           | ThrowTerm Term Term
           | TupleTerm [Term]
           | TypeApplyTerm FunctionIdent [Type]
           | UnitTerm
+          | Unreachable Type
           | UntupleTerm [ValueIdent] Term Term
           | VariableTerm ValueIdent
             deriving (Eq, Show)

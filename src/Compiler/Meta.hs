@@ -20,7 +20,9 @@ instance Monad Result where
   Arity s k >>= f = Arity s (\ x -> k x >>= f)
 
 env :: [(String, ([String], Type.Type))]
-env = [("Exit", ([], Type.Variant "Output" []))]
+env = [ ("Exit", ([], Type.Variant "Output" []))
+      , ("Unreachable", (["a"], Type.Variable "a"))
+      ]
 
 addMetavariables :: Program -> Program
 addMetavariables (Program ds) = Program (reverse ds')
@@ -57,6 +59,14 @@ term (BindTerm _ p t1 t2) = do m <- genMeta ()
                                t1' <- term t1
                                t2' <- term t2
                                return $ BindTerm m p t1' t2'
+term (CaseTerm _ t rs)    = do m <- genMeta ()
+                               t' <- term t
+                               rs' <- mapM rule rs
+                               return $ CaseTerm m t' rs'
+                            where rule (p, t) = do
+                                    p' <- pat p
+                                    t' <- term t
+                                    return (p', t')
 term (SeqTerm t1 t2)      = do t1' <- term t1
                                t2' <- term t2
                                return $ SeqTerm t1' t2'
@@ -79,6 +89,13 @@ pat (TuplePat ms ps)  = do ms' <- mapM genMeta ms
                            return $ TuplePat ms' ps'
 pat UnderbarPat       = return UnderbarPat
 pat (UnitPat pos)     = return $ UnitPat pos
+pat (UpperPat pos _ _ x ps)
+                      = do (ss, tys, ty) <- return ([], [], Type.Variant "Output" []) -- fix Constructor x
+                           ss' <- mapM genMeta ss
+                           ty' <- return $ Type.rename (zip ss ss') ty
+                           tys' <- return $ map (Type.rename (zip ss ss')) tys
+                           ps' <- mapM pat ps
+                           return $ UpperPat pos tys' ty' x ps'
 
 -- Utility
 

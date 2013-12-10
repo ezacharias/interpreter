@@ -145,11 +145,7 @@ upper = do
     _ -> failure
 
 leftBracket :: AmbiguousParser ()
-leftBracket = do
-  t <- token
-  case t of
-    LeftBracketToken -> return ()
-    _ -> failure
+leftBracket = isToken LeftBracketToken
 
 lower :: AmbiguousParser Syntax.Ident
 lower = do
@@ -174,7 +170,7 @@ rightParen :: AmbiguousParser ()
 rightParen = isToken RightParenToken
 
 rightBracket :: AmbiguousParser ()
-rightBracket = error "right bracket"
+rightBracket = isToken RightBracketToken
 
 keyword :: String -> AmbiguousParser ()
 keyword s1 = do
@@ -232,13 +228,30 @@ seqStm = do
     return $ Syntax.SeqTerm t1 t2
 
 stm1 :: AmbiguousParser Syntax.Term
-stm1 = do
-  Syntax.Pos _ l _ <- position
-  line l term0
+stm1 =
+  choice [ caseStm
+         , do Syntax.Pos _ l _ <- position
+              line l term0
+         ]
+
+caseStm :: AmbiguousParser Syntax.Term
+caseStm = do
+  Syntax.Pos _ _ c <- position
+  keyword "case"
+  t <- term2
+  rs <- many1 $ aligned (c + 2) rule
+  return $ Syntax.CaseTerm Type.Unit t rs
+
+rule :: AmbiguousParser (Syntax.Pat, Syntax.Term)
+rule = do
+  Syntax.Pos _ _ c <- position
+  p <- pat0
+  t <- aligned (c + 2) stm0
+  return (p, t)
 
 term0 :: AmbiguousParser Syntax.Term
 term0 = do
-  e <- term1
+  e <- term2
   choice [ ascribeTerm e
          , return e
          ]
@@ -305,7 +318,17 @@ pat0 = do
          ]
 
 pat1 :: AmbiguousParser Syntax.Pat
-pat1 = pat2
+pat1 =
+  choice [ upperPat
+         , pat2
+         ]
+
+upperPat :: AmbiguousParser Syntax.Pat
+upperPat = do
+  pos <- position
+  s <- upper
+  ps <- many pat3
+  return $ Syntax.UpperPat pos [] Type.Unit s ps
 
 pat2 :: AmbiguousParser Syntax.Pat
 pat2 =
