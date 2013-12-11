@@ -1,10 +1,23 @@
+-- Throw(tag : Tag⟦a, b⟧)(x : a) : b
+-- Catch(tag : Tag⟦a, b⟧, f : () ⟶ c)(g : a ⟶ (b ⟶ c) ⟶ c) ⟶ c
+
+sum Bool
+  False
+  True
+
+new T : Tag⟦Bool, ()⟧
 
 Main() : Output
-  Foo(Exit)
+  Handle(T, F)(G)
+  -- Throw(T)(True)
+  Exit
 
-Foo(x : Output) : Output
-  case x
-    _
-      Unreachable
-    Exit
-      x
+F() : ()
+  Throw(T)(True)
+
+G(x : Bool)(k : () ⟶ ()) : ()
+  Unreachable
+
+-- sum List⟦a⟧
+--   Nil
+--   Cons(a, List⟦a⟧)

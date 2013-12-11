@@ -8,8 +8,8 @@ data Program = Program [Dec]
 type Ident = String
 
 data Dec = FunDec Pos String [String] [Pat] Typ Term
-      -- | SumDec Pos String [String] [(Pos, String, [Pat])]
-      -- | TagDec Pos String Typ
+         | SumDec Pos String [String] [(Pos, String, [Typ])]
+         | TagDec Pos String Typ
            deriving (Eq, Show)
 
 data Term = ApplyTerm Type.Type Term Term
@@ -37,7 +37,7 @@ data Typ = ArrowTyp Typ Typ
          | LowerTyp String
          | TupleTyp [Typ]
          | UnitTyp Pos
-         | UpperTyp Pos String -- [Typ]
+         | UpperTyp Pos String [Typ]
            deriving (Eq, Show)
 
 -- | Position filename line col.
@@ -48,6 +48,10 @@ data Pos = Pos String Int Int
 funType :: [Pat] -> Typ -> Type.Type
 funType []     t = typType t
 funType (p:ps) t = Type.Arrow (patType p) (funType ps t)
+
+constructorType :: [Typ] -> String -> [String] -> Type.Type
+constructorType []       s1 ss = Type.Variant s1 (map Type.Variable ss)
+constructorType (ty:tys) s1 ss = Type.Arrow (typType ty) (constructorType tys s1 ss)
 
 patType :: Pat -> Type.Type
 patType (AscribePat p ty) = typType ty -- not sure about this
@@ -62,4 +66,4 @@ typType (ArrowTyp ty1 ty2) = Type.Arrow (typType ty1) (typType ty2)
 typType (LowerTyp s)       = Type.Variable s
 typType (TupleTyp tys)     = Type.Tuple (map typType tys)
 typType (UnitTyp _)        = Type.Unit
-typType (UpperTyp _ s)     = Type.Variant s []
+typType (UpperTyp _ s tys) = Type.Variant s (map typType tys)

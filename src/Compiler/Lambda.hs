@@ -42,7 +42,7 @@ data Type = ArrowType Type Type
 data Term = ApplyTerm Term Term
           | BindTerm ValueIdent Term Term
        -- | CaseTerm Term [([ValueIdent], Term)]
-          | CatchTerm Term ValueIdent Term Term
+          | CatchTerm Term Term ValueIdent ValueIdent Term
           | ConstructorTerm VariantIdent [Type] ConstructorIndex [Term]
           | IsEqualTerm Type Term Term
           | LambdaTerm ValueIdent Type Term

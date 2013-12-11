@@ -1,6 +1,7 @@
 module Compiler.Elaborator where
 
-import           Data.Maybe      (fromJust)
+import           Control.Monad   (liftM)
+import           Data.Maybe      (catMaybes, fromJust)
 
 import qualified Compiler.Lambda as Lambda
 import qualified Compiler.Syntax as Syntax
@@ -26,85 +27,161 @@ impossible :: a
 impossible = error "impossible"
 
 run :: Result a -> a
-run m = check 3 m
+run m = check genStart m
   where check n (Normal x)                   = x
         check n (Gen k)                      = check (n + 1) (k n)
         check n (LookupUpper s k)            = impossible
         check n (LookupTypeVariable s k)     = impossible
         check n (LookupValueVariable s k)    = impossible
-        check n (LookupConstructorIndex s k) = check n $ k 0 -- fix
+        check n (LookupConstructorIndex s k) = impossible
 
 gen :: a -> Result Int
 gen _ = Gen Normal
 
+withConstructors :: [(String, Int)] -> Result a -> Result a
+withConstructors gs m = check m
+  where check (Normal x)                   = Normal x
+        check (Gen k)                      = Gen (check . k)
+        check (LookupUpper s k)            = LookupUpper s (check . k)
+        check (LookupConstructorIndex s k) = check $ k (lookupJust s gs)
+        check (LookupTypeVariable s k)     = LookupTypeVariable s (check . k)
+        check (LookupValueVariable s k)    = LookupValueVariable s (check . k)
+
 withUppers :: [(String, Int)] -> Result a -> Result a
 withUppers gs m = check m
-  where check (Normal x)                = Normal x
-        check (Gen k)                   = Gen (check . k)
-        check (LookupUpper s k)         = check $ k (lookupJust s gs)
+  where check (Normal x)                   = Normal x
+        check (Gen k)                      = Gen (check . k)
+        check (LookupUpper s k)            = check $ k (lookupJust s gs)
         check (LookupConstructorIndex s k) = LookupConstructorIndex s (check . k)
-        check (LookupTypeVariable s k)  = LookupTypeVariable s (check . k)
-        check (LookupValueVariable s k) = LookupValueVariable s (check . k)
+        check (LookupTypeVariable s k)     = LookupTypeVariable s (check . k)
+        check (LookupValueVariable s k)    = LookupValueVariable s (check . k)
 
 withTypes :: [(String, Int)] -> Result a -> Result a
 withTypes gs m = check m
-  where check (Normal x)                = Normal x
-        check (Gen k)                   = Gen (check . k)
-        check (LookupUpper s k)         = LookupUpper s (check . k)
+  where check (Normal x)                   = Normal x
+        check (Gen k)                      = Gen (check . k)
+        check (LookupUpper s k)            = LookupUpper s (check . k)
         check (LookupConstructorIndex s k) = LookupConstructorIndex s (check . k)
-        check (LookupTypeVariable s k)  = check $ k (lookupJust s gs)
-        check (LookupValueVariable s k) = LookupValueVariable s (check . k)
+        check (LookupTypeVariable s k)     = check $ k (lookupJust s gs)
+        check (LookupValueVariable s k)    = LookupValueVariable s (check . k)
 
 withLower :: String -> Int -> Result a -> Result a
 withLower d d' m = check m
-  where check (Normal x)                = Normal x
-        check (Gen k)                   = Gen (check . k)
-        check (LookupUpper s k)         = LookupUpper s (check . k)
+  where check (Normal x)                   = Normal x
+        check (Gen k)                      = Gen (check . k)
+        check (LookupUpper s k)            = LookupUpper s (check . k)
         check (LookupConstructorIndex s k) = LookupConstructorIndex s (check . k)
-        check (LookupTypeVariable s k)  = LookupTypeVariable s (check . k)
+        check (LookupTypeVariable s k)     = LookupTypeVariable s (check . k)
         check (LookupValueVariable s k)
-                            | s == d    = check $ k d'
-                            | otherwise = LookupValueVariable s (check . k)
-
--- data Program = Program [(TagIdent, Tag)] [(VariantIdent, Variant)] [(FunctionIdent, Function)] FunctionIdent
+                               | s == d    = check $ k d'
+                               | otherwise = LookupValueVariable s (check . k)
 
 elaborate :: Syntax.Program -> Lambda.Program
 elaborate p = run (elaborateProgram p)
 
 funs :: [(Lambda.FunctionIdent, Lambda.Function)]
-funs = [ (0, Lambda.Function [] (Lambda.VariantType 0 [])
+funs = [ -- Exit
+         (0, Lambda.Function [] (Lambda.VariantType 0 [])
                (Lambda.ConstructorTerm 0 [] 0 []))
-       , (1, Lambda.Function [2] (Lambda.VariableType 2)
-               (Lambda.Unreachable (Lambda.VariableType 2)))
+         -- Handle
+       , (1, Lambda.Function [] undefined
+               (Lambda.LambdaTerm 2 undefined
+                 (Lambda.LambdaTerm 3 undefined
+                   (Lambda.UntupleTerm [4, 5] (Lambda.VariableTerm 2)
+                     (Lambda.CatchTerm (Lambda.VariableTerm 4)
+                                       (Lambda.ApplyTerm (Lambda.VariableTerm 5) Lambda.UnitTerm)
+                                       6
+                                       7
+                                       (Lambda.ApplyTerm (Lambda.ApplyTerm (Lambda.VariableTerm 3) (Lambda.VariableTerm 6))
+                                                         (Lambda.VariableTerm 7)))))))
+         -- Throw
+       , (6, Lambda.Function [] undefined
+               (Lambda.LambdaTerm 7 undefined
+                 (Lambda.LambdaTerm 8 undefined
+                   (Lambda.ThrowTerm (Lambda.VariableTerm 7) (Lambda.VariableTerm 8)))))
+         -- Unreachable
+       , (9, Lambda.Function [10] (Lambda.VariableType 10)
+               (Lambda.Unreachable (Lambda.VariableType 10)))
        ]
+
+genStart :: Int
+genStart = 11
+
+constructorEnv :: [(String, Int)]
+constructorEnv = [ ("Exit", 0)
+                 ]
 
 env :: [(String, Int)]
 env = [ ("Exit", 0)
-      , ("Unreachable", 1)
+      , ("Handle", 1)
+      , ("Throw", 6)
+      , ("Unreachable", 9)
       ]
 
 elaborateProgram :: Syntax.Program -> Result Lambda.Program
-elaborateProgram (Syntax.Program ds) = do gs <- mapM f ds
-                                          withUppers (env ++ gs) $ do
-                                            xs <- mapM elaborateFunction ds
-                                            d <- LookupUpper "Main" Normal
-                                            return $ Lambda.Program [] [] (funs ++ xs) d
-  where f (Syntax.FunDec _ s _ _ _ _) = do { d <- gen (); return (s, d) }
+elaborateProgram (Syntax.Program ds) = do
+  (gs1, gs2) <- decEnvs ([], []) ds
+  withConstructors (constructorEnv ++ gs1) $ do
+    withUppers (env ++ gs2) $ do
+      xs1 <- liftM catMaybes $ mapM elaborateVariant ds
+      xs2 <- liftM concat $ mapM elaborateFunction ds
+      d <- LookupUpper "Main" Normal
+      return $ Lambda.Program [] xs1 (funs ++ xs2) d
 
-elaborateFunction :: Syntax.Dec -> Result (Lambda.FunctionIdent, Lambda.Function)
-elaborateFunction (Syntax.FunDec _ s ss ps t e) = do d  <- LookupUpper s Normal
-                                                     ds <- mapM gen ss
-                                                     withTypes (zip ss ds) $ do
-                                                       e' <- elaborateCurried ps e
-                                                       t  <- elaborateType (Syntax.funType ps t)
-                                                       return (d, Lambda.Function ds t e')
+decEnvs :: ([(String, Int)], [(String, Int)]) -> [Syntax.Dec] -> Result ([(String, Int)], [(String, Int)])
+decEnvs (xs, ys) []                               = return (xs, ys)
+decEnvs (xs, ys) (Syntax.FunDec _ s _ _ _ _ : ds) = do { d <- gen (); decEnvs (xs, (s, d) : ys) ds }
+decEnvs (xs, ys) (Syntax.SumDec _ s _ rs : ds)    = do d <- gen ()
+                                                       ss <- return $ map (\ (_, s, _) -> s) rs
+                                                       ns <- mapM gen rs
+                                                       decEnvs (zip ss [0..] ++ xs, zip ss ns ++ ys) ds
+decEnvs (xs, ys) (Syntax.TagDec _ s ty : ds)      = do d <- gen ()
+                                                       decEnvs (xs, (s, d) : ys) ds
+
+elaborateFunction :: Syntax.Dec -> Result [(Lambda.FunctionIdent, Lambda.Function)]
+elaborateFunction (Syntax.FunDec _ s ss ps t e) = do
+  d  <- LookupUpper s Normal
+  ds <- mapM gen ss
+  withTypes (zip ss ds) $ do
+    e' <- elaborateCurried ps e
+    t  <- elaborateType (Syntax.funType ps t)
+    return [(d, Lambda.Function ds t e')]
+elaborateFunction (Syntax.SumDec _ s1 ss rs) = mapM f (zip [0..] rs)
+  where f (i, (_, s2, tys)) = do
+          d <- LookupUpper s2 Normal
+          ds <- mapM gen ss
+          withTypes (zip ss ds) $ do
+            ty <- elaborateType (Syntax.constructorType tys s1 ss)
+            tys' <- mapM (elaborateType . Syntax.typType) tys
+            t <- g tys' [] i
+            return (d, Lambda.Function ds ty t)
+        g []       ds i = return $ Lambda.ConstructorTerm undefined undefined i (map Lambda.VariableTerm ds)
+        g (ty:tys) ds i = do d <- gen ()
+                             t <- g tys (d:ds) i
+                             return $ Lambda.LambdaTerm d ty t
+elaborateFunction (Syntax.TagDec _ s ty) = do
+  d <- LookupUpper s Normal
+  ty' <- elaborateType (Syntax.typType ty)
+  return $ [(d, Lambda.Function [] ty' (Lambda.TagTerm d))]
+
+elaborateVariant :: Syntax.Dec -> Result (Maybe (Lambda.VariantIdent, Lambda.Variant))
+elaborateVariant (Syntax.FunDec _ _ _ _ _ _) = return Nothing
+elaborateVariant (Syntax.SumDec _ s ss rs) = do
+  d <- return undefined
+  ds <- mapM gen ss
+  withTypes (zip ss ds) $ do
+    ns <- mapM (\ (_, n, _) -> return n) rs
+    xs <- mapM (\ (_, _, tys) -> mapM (elaborateType . Syntax.typType) tys) rs
+    return (Just (d, Lambda.Variant ds ns xs))
+elaborateVariant (Syntax.TagDec _ _ _) = return Nothing
 
 elaborateCurried :: [Syntax.Pat] -> Syntax.Term -> Result Lambda.Term
 elaborateCurried [] e     = elaborateTerm e
-elaborateCurried (p:ps) e = do d <- Gen Normal
-                               e' <- elaboratePat d p (elaborateCurried ps e)
-                               t <- elaborateType $ Syntax.patType p
-                               return $ Lambda.LambdaTerm d t e'
+elaborateCurried (p:ps) e = do
+  d <- Gen Normal
+  e' <- elaboratePat d p (elaborateCurried ps e)
+  t <- elaborateType $ Syntax.patType p
+  return $ Lambda.LambdaTerm d t e'
 
 elaboratePat :: Lambda.ValueIdent -> Syntax.Pat -> Result Lambda.Term -> Result Lambda.Term
 elaboratePat d p m = elaboratePatAlt d p m (return $ Lambda.Unreachable undefined)

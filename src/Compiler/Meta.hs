@@ -12,40 +12,69 @@ import qualified Compiler.Type   as Type
 data Result a = Normal a
               | Next         (Int -> Result a)
               | Arity String (([String], Type.Type) -> Result a)
+              | Constructor String (([String], [Type.Type], Type.Type) -> Result a)
 
 instance Monad Result where
   return = Normal
-  Normal x  >>= f = f x
-  Next k    >>= f = Next    (\ x -> k x >>= f)
-  Arity s k >>= f = Arity s (\ x -> k x >>= f)
+  Normal x        >>= f = f x
+  Next k          >>= f = Next    (\ x -> k x >>= f)
+  Arity s k       >>= f = Arity s (\ x -> k x >>= f)
+  Constructor s k >>= f = Constructor s (\ x -> k x >>= f)
 
 env :: [(String, ([String], Type.Type))]
 env = [ ("Exit", ([], Type.Variant "Output" []))
+      , ("Handle", (["a", "b", "c"], Type.Arrow (Type.Tuple [ Type.Variant "Tag" [Type.Variable "a", Type.Variable "b"]
+                                                            , Type.Arrow Type.Unit (Type.Variable "c")
+                                                            ])
+                                                (Type.Arrow (Type.Arrow (Type.Variable "a")
+                                                                        (Type.Arrow (Type.Arrow (Type.Variable "b") (Type.Variable "c"))
+                                                                                    (Type.Variable "c")))
+                                                            (Type.Variable "c"))))
+      , ("Throw", (["a", "b"], Type.Arrow (Type.Variant "Tag" [Type.Variable "a", Type.Variable "b"])
+                                          (Type.Arrow (Type.Variable "a")
+                                                      (Type.Variable "b"))))
       , ("Unreachable", (["a"], Type.Variable "a"))
       ]
+
+constructorEnv :: [(String, ([String], [Type.Type], Type.Type))]
+constructorEnv = [ ("Exit", ([], [], Type.Variant "Output" []))
+                 ]
 
 addMetavariables :: Program -> Program
 addMetavariables (Program ds) = Program (reverse ds')
   where r = foldl arity env ds
+        g = foldl constructors constructorEnv ds
         (ds', _) = foldl f ([], 0) ds
         f :: ([Dec], Int) -> Dec -> ([Dec], Int)
-        f (ds', n) d = dec ds' r n d
+        f (ds', n) d = dec ds' g r n d
 
 arity :: [(String, ([String], Type.Type))] -> Dec -> [(String, ([String], Type.Type))]
 arity r (FunDec _ s ss ps ty _) = (s, (ss, funType ps ty)) : r
+arity r (SumDec _ s1 ss rs) = foldl f r rs
+                              where f r (_, s2, tys) = (s2, (ss, constructorType tys s1 ss)) : r
+arity r (TagDec _ s ty) = (s, ([], typType ty)) : r
+
+constructors :: [(String, ([String], [Type.Type], Type.Type))] -> Dec -> [(String, ([String], [Type.Type], Type.Type))]
+constructors r (FunDec _ _ _ _ _ _) = r
+constructors r (SumDec _ s1 ss rs) = foldl f r rs
+                                     where f r (_, s2, tys) = (s2, (ss, map typType tys, Type.Variant s1 (map Type.Variable ss))) : r
+constructors r (TagDec _ _ _) = r
 
 genMeta :: a -> Result Type.Type
 genMeta _ = Next (Normal . Type.Metavariable)
 
 -- data Dec = FunDec Pos String [String] [Pat] Typ Term
-dec :: [Dec] -> [(String, ([String], Type.Type))] -> Int -> Dec -> ([Dec], Int)
-dec ds r n (FunDec pos s ss ps t e) = check n m
+dec :: [Dec] -> [(String, ([String], [Type.Type], Type.Type))] -> [(String, ([String], Type.Type))] -> Int -> Dec -> ([Dec], Int)
+dec ds g r n (FunDec pos s ss ps t e) = check n m
   where m = do ps' <- mapM pat ps
                t' <- term e
                return $ FunDec pos s ss ps' t t' : ds
-        check n (Normal e)  = (e, n)
-        check n (Next k)    = check (n + 1) (k n)
-        check n (Arity s k) = check n (k (lookupJust s r))
+        check n (Normal e)        = (e, n)
+        check n (Next k)          = check (n + 1) (k n)
+        check n (Arity s k)       = check n (k (lookupJust s r))
+        check n (Constructor s k) = check n (k (lookupJust s g))
+dec ds g r n (SumDec pos s ss rs) = (SumDec pos s ss rs : ds, n)
+dec ds g r n (TagDec pos s ty)    = (TagDec pos s ty : ds, n)
 
 term :: Term -> Result Term
 term (ApplyTerm _ t1 t2)  = do m <- genMeta ()
@@ -90,7 +119,7 @@ pat (TuplePat ms ps)  = do ms' <- mapM genMeta ms
 pat UnderbarPat       = return UnderbarPat
 pat (UnitPat pos)     = return $ UnitPat pos
 pat (UpperPat pos _ _ x ps)
-                      = do (ss, tys, ty) <- return ([], [], Type.Variant "Output" []) -- fix Constructor x
+                      = do (ss, tys, ty) <- Constructor x Normal
                            ss' <- mapM genMeta ss
                            ty' <- return $ Type.rename (zip ss ss') ty
                            tys' <- return $ map (Type.rename (zip ss ss')) tys

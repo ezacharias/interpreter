@@ -367,9 +367,14 @@ typ0 = do
 typ1 :: AmbiguousParser Syntax.Typ
 typ1 = do
   choice [ lowerTyp
-         , tupleTyp
-         , unitTyp
          , upperTyp
+         , typ2
+         ]
+
+typ2 :: AmbiguousParser Syntax.Typ
+typ2 = do
+  choice [ tupleTyp
+         , unitTyp
          , do leftParen
               ty <- typ0
               rightParen
@@ -398,17 +403,48 @@ unitTyp = do
 upperTyp :: AmbiguousParser Syntax.Typ
 upperTyp = do
   pos <- position
-  x <- upper
-  return $ Syntax.UpperTyp pos x
+  e1 <- upper
+  e2 <- choice [ do leftBracket
+                    e2 <- liftM2 (:) typ0 (many $ comma >> typ0)
+                    rightBracket
+                    return e2
+               , return []
+               ]
+  return $ Syntax.UpperTyp pos e1 e2
 
 undefinedPosition :: Syntax.Pos
 undefinedPosition = Syntax.Pos "" 0 0
 
 sumDec :: AmbiguousParser Syntax.Dec
-sumDec = undefinedFailure
+sumDec = do
+  pos <- position
+  Syntax.Pos _ _ c <- position
+  keyword "sum"
+  e1 <- upper
+  e2 <- choice [ do leftBracket
+                    e2 <- liftM2 (:) lower (many $ comma >> lower)
+                    rightBracket
+                    return e2
+               , return []
+               ]
+  e3 <- many $ aligned (c + 2) constructor
+  return $ Syntax.SumDec pos e1 e2 e3
+
+constructor :: AmbiguousParser (Syntax.Pos, String, [Syntax.Typ])
+constructor = do
+  pos <- position
+  e1 <- upper
+  e2 <- many typ2
+  return (pos, e1, e2)
 
 tagDec :: AmbiguousParser Syntax.Dec
-tagDec = undefinedFailure
+tagDec = do
+  pos <- position
+  keyword "new"
+  e1 <- upper
+  colon
+  e2 <- typ0
+  return $ Syntax.TagDec pos e1 e2
 
 undefinedFailure :: AmbiguousParser a
 undefinedFailure = failure

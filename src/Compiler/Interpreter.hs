@@ -116,10 +116,12 @@ eval :: Term -> Result Value
 eval (ApplyTerm e1 e2)          = do { v1 <- eval e1; v2 <- eval e2; (closureValue v1) v2 }
 eval (BindTerm d e1 e2)         = do { v1 <- eval e1; bind [d] [v1] e2 }
 -- eval (CaseTerm e cs)            = do { v <- eval e; evalCase cs (variantValue v) }
-eval (CatchTerm e1 d e2 e3)     = do { tag <- eval e1; evalCatchTerm (tagValue tag) d e2 (eval e3) }
+eval (CatchTerm e1 e2 d1 d2 e3) = do { tag <- eval e1; evalCatchTerm (tagValue tag) (eval e2) d1 d2 e3 }
 eval (ConstructorTerm _ _ d es) = mapM eval es >>= Normal . VariantValue d
 eval (IsEqualTerm t e1 e2)      = do { t' <- evalType t; v1 <- eval e1; v2 <- eval e2; evalIsEqualTerm t' v1 v2 }
-eval (LambdaTerm d t e)         = Normal $ ClosureValue (\ v -> bind [d] [v] e)
+eval (LambdaTerm d t e)         = do xs <- GetTypeEnvironment Normal
+                                     ys <- GetValueEnvironment Normal
+                                     Normal $ ClosureValue (\ v -> withDynamicEnvironment xs ((d, v) : ys) (eval e))
 eval (ProtectTerm e1 e2)        = protect e2 (eval e1)
 eval (StringTerm s)             = Normal $ StringValue s
 eval (TagTerm d)                = Normal $ TagValue d
@@ -147,9 +149,9 @@ evalCase :: [([ValueIdent], Term)] -> (ConstructorIndex, [Value]) -> Result Valu
 evalCase cs (n, vs) = bind ds vs e'
                       where (ds, e') = cs !! n
 
-evalCatchTerm :: TagIdent -> ValueIdent -> Term -> Result Value -> Result Value
-evalCatchTerm tag1 d e r = check r
-  where check (Escape tag2 v k) | tag1 == tag2 = bind [d] [TupleValue [v, ClosureValue (check . k)]] e
+evalCatchTerm :: TagIdent -> Result Value -> ValueIdent -> ValueIdent -> Term -> Result Value
+evalCatchTerm tag1 r d1 d2 e = check r
+  where check (Escape tag2 v k) | tag1 == tag2 = bind [d1, d2] [v, ClosureValue (check . k)] e
         check x = warp check x
 
 evalIsEqualTerm :: Type -> Value -> Value -> Result Value

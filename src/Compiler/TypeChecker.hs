@@ -27,11 +27,13 @@ inferProgram :: Syntax.Program -> Either String Syntax.Program
 inferProgram (Syntax.Program xs) = liftM Syntax.Program (mapM inferDec xs)
 
 inferDec :: Syntax.Dec -> Either String Syntax.Dec
+inferDec (Syntax.SumDec pos s ss rs) = Right $ Syntax.SumDec pos s ss rs
 inferDec (Syntax.FunDec pos s ss ps ty t) = do t' <- inferTerm g sigmaEmpty ty' t
                                                return $ Syntax.FunDec pos s ss ps ty t'
   where tys' = map Syntax.patType ps
         ty' = Syntax.typType ty
         g = gammaWithPats g ps tys'
+inferDec (Syntax.TagDec pos s ty) = Right $ Syntax.TagDec pos s ty
 
 -- | Metavariables
 type Sigma = IntMap Type.Type
