@@ -5,18 +5,24 @@ sum Bool
   False
   True
 
-new T : Tag⟦Bool, ()⟧
+new T : Tag⟦(), Bool⟧
 
 Main() : Output
-  Handle(T, F)(G)
-  -- Throw(T)(True)
+  bind () to With
   Exit
 
-F() : ()
-  Throw(T)(True)
+K() : Output
+  bind x to Get(T)
+  Exit
 
-G(x : Bool)(k : () ⟶ ()) : ()
-  Unreachable
+With⟦a, b⟧(t : Tag⟦(), a⟧, x : a)(k : () ⟶ b) : b
+  Handle(t, k)(C(x))
+
+Get⟦a⟧(t : Tag⟦(), a⟧) : a
+  Throw(t)()
+
+C⟦a, b⟧(x : a)(_ : ())(f : a ⟶ b) : b
+  f(x)
 
 -- sum List⟦a⟧
 --   Nil

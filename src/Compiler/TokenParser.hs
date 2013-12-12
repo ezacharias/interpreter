@@ -45,7 +45,7 @@ runAmbiguousParser :: AmbiguousParser a -> (a -> TokenParser Syntax.Program) -> 
 runAmbiguousParser (AmbiguousParser f) = f
 
 failurePos :: Syntax.Pos -> AmbiguousParser a
-failurePos (Syntax.Pos _ line col) = AmbiguousParser (\ k -> TokenParserError (line, col) "Parsing error.")
+failurePos (Syntax.Pos _ line col) = AmbiguousParser (\ k -> TokenParserError (line, col) "")
 
 failure :: AmbiguousParser a
 failure = failurePos =<< position

@@ -22,14 +22,14 @@ data Driver a = DriverReturn a
 
 instance Monad Driver where
   return = DriverReturn
-  DriverReturn x >>= f = f x
+  DriverReturn x     >>= f = f x
   DriverPerformIO io >>= f = DriverPerformIO $ liftM (f =<<) io
-  DriverError msg >>= _f = DriverError msg
+  DriverError msg    >>= f = DriverError msg
 
 drive :: Driver a -> IO a
-drive (DriverReturn a) = return a
+drive (DriverReturn a)     = return a
 drive (DriverPerformIO io) = io >>= drive
-drive (DriverError msg) = putStrLn msg >> exitFailure
+drive (DriverError msg)    = hPutStrLn stderr msg >> exitFailure
 
 liftIO :: IO a -> Driver a
 liftIO io = DriverPerformIO (liftM return io)
@@ -66,6 +66,7 @@ hParse filename handle = parse (parser filename)
   where parse :: Parser -> Driver Syntax.Program
         parse (ParserFinished prog) = return prog
         parse (ParserCharRequest k) = liftIO (maybeHGetChar handle) >>= (parse . k)
+        parse (ParserError (line, col) "")  = DriverError $ ":" ++ show line ++ ":" ++ show col ++ ": Parser error."
         parse (ParserError (line, col) msg) = DriverError $ ":" ++ show line ++ ":" ++ show col ++ ": Parser error: " ++ msg
         parse (ParserTokenizerError (line, col)) = DriverError $ ":" ++ show line ++ ":" ++ show col ++ ": Tokenizer error."
 
