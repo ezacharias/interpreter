@@ -1,5 +1,7 @@
 -- Throw(tag : Tag⟦a, b⟧)(x : a) : b
 -- Catch(tag : Tag⟦a, b⟧, f : () ⟶ c)(g : a ⟶ (b ⟶ c) ⟶ c) ⟶ c
+-- Unreachable : a
+-- Exit : Output
 
 sum Bool
   False
@@ -8,8 +10,11 @@ sum Bool
 new T : Tag⟦(), Bool⟧
 
 Main() : Output
-  bind () to With
+  bind (x, y) : ((), ()) to (Unreachable, Unreachable)
   Exit
+
+Z⟦a⟧(x : a) : ()
+  Z(x, x)
 
 K() : Output
   bind x to Get(T)

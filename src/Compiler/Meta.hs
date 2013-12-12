@@ -112,7 +112,7 @@ term (VariableTerm p s)   = return $ VariableTerm p s
 pat :: Pat -> Result Pat
 pat (AscribePat p ty) = do p' <- pat p
                            return $ AscribePat p' ty
-pat (LowerPat x)      = return $ LowerPat x
+pat (LowerPat pos x)  = return $ LowerPat pos x
 pat (TuplePat ms ps)  = do ms' <- mapM genMeta ms
                            ps' <- mapM pat ps
                            return $ TuplePat ms' ps'

@@ -26,7 +26,7 @@ data Term = ApplyTerm Type.Type Term Term
 type Rule = (Pat, Term)
 
 data Pat = AscribePat Pat Typ
-         | LowerPat String
+         | LowerPat Pos String
          | TuplePat [Type.Type] [Pat]
          | UnderbarPat
          | UnitPat Pos
@@ -55,7 +55,7 @@ constructorType (ty:tys) s1 ss = Type.Arrow (typType ty) (constructorType tys s1
 
 patType :: Pat -> Type.Type
 patType (AscribePat p ty) = typType ty -- not sure about this
-patType (LowerPat s)      = error "Compiler.Syntax.patType"
+patType (LowerPat _ s)    = error "Compiler.Syntax.patType"
 patType (TuplePat _ ps)   = Type.Tuple (map patType ps)
 patType UnderbarPat       = error "Compiler.Syntax.patType"
 patType (UnitPat _)       = Type.Unit

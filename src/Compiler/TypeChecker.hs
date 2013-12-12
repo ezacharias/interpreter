@@ -44,33 +44,40 @@ inferDec (Syntax.FunDec pos s ss ps ty t) = do
   case inferTerm g sigmaEmpty (Syntax.typType ty) t of
     Left msg -> Left msg
     Right t -> Right $ Syntax.FunDec pos s ss ps ty t
-  where g = gammaWithPats g ps tys'
+  where g = either (\ _ -> error "impossible") id $ gammaWithPats g sigmaEmpty ps tys'
         tys' = map Syntax.patType ps
 
 inferDec (Syntax.TagDec pos s ty) =
   Right $ Syntax.TagDec pos s ty
 
 
-gammaWithPats :: Gamma -> [Syntax.Pat] -> [Type.Type] -> Gamma
-
-gammaWithPats g []     []     = g
-gammaWithPats g (p:ps) (ty:tys) = gammaWithPats (gammaWithPat g p ty) ps tys
-gammaWithPats g _      _      = error "Compiler.TypeChecker.withPats: impossible"
-
-
 -- Do I just want to add the metavariable?
 
-gammaWithPat :: Gamma -> Syntax.Pat -> Type.Type -> Gamma
+gammaWithPat :: Gamma -> Sigma -> Syntax.Pat -> Type.Type -> Either String Gamma
 
-gammaWithPat g (Syntax.AscribePat p _) ty = gammaWithPat g p ty
-gammaWithPat g (Syntax.LowerPat s)     ty = gammaBind g s ty
-gammaWithPat g (Syntax.TuplePat _ ps)  ty = case ty of
-                                              Type.Tuple tys -> gammaWithPats g ps tys
-                                              _ -> error "impossible"
-gammaWithPat g Syntax.UnderbarPat      ty = g
-gammaWithPat g (Syntax.UnitPat _)      ty = g
-gammaWithPat g (Syntax.UpperPat _ tys _ _ ps)
-                                       ty = gammaWithPats g ps tys
+gammaWithPat g s (Syntax.AscribePat p _)        ty = gammaWithPat g s p ty
+gammaWithPat g s (Syntax.LowerPat pos n)        ty =
+  if isConcreteType ty'
+    then Right $ gammaBind g n ty'
+    else Left $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Variable bindings must have concrete types. Given " ++ fst (showType [] (updateType s ty')) ++ "."
+  where ty' = updateType s ty
+        (m, _) = showType [] ty'
+        Syntax.Pos filename line col = pos
+gammaWithPat g s (Syntax.TuplePat _ ps)         ty = case ty of
+                                                     Type.Tuple tys -> gammaWithPats g s ps tys
+                                                     _ -> error "impossible"
+gammaWithPat g s Syntax.UnderbarPat             ty = Right g
+gammaWithPat g s (Syntax.UnitPat _)             ty = Right g
+gammaWithPat g s (Syntax.UpperPat _ tys _ _ ps) ty = gammaWithPats g s ps tys
+
+
+gammaWithPats :: Gamma -> Sigma -> [Syntax.Pat] -> [Type.Type] -> Either String Gamma
+
+gammaWithPats g s []     []       = Right g
+gammaWithPats g s (p:ps) (ty:tys) = case gammaWithPat g s p ty of
+                                      Left msg -> Left msg
+                                      Right g -> gammaWithPats g s ps tys
+gammaWithPats g s _      _        = error "Compiler.TypeChecker.withPats: impossible"
 
 
 -- The first thing we do is run typeCheckTerm, which gets us the table of
@@ -79,34 +86,61 @@ gammaWithPat g (Syntax.UpperPat _ tys _ _ ps)
 
 inferTerm :: Gamma -> Sigma -> Type.Type -> Syntax.Term -> Either String Syntax.Term
 
-inferTerm g s ty t = do (ty, s) <- typeCheckTerm g s ty t
-                        return $ updateTerm s t
+inferTerm g s ty t = do s <- typeCheckTerm g s ty t
+                        return $ concreteTerm s t
 
 
 -- Replaces all metavariables in the term with concrete types.
 
-updateTerm :: Sigma -> Syntax.Term -> Syntax.Term
+concreteTerm :: Sigma -> Syntax.Term -> Syntax.Term
 
-updateTerm s (Syntax.ApplyTerm m t1 t2)   = Syntax.ApplyTerm (updateType s m) (updateTerm s t1) (updateTerm s t2)
-updateTerm s (Syntax.AscribeTerm p t ty)  = Syntax.AscribeTerm p (updateTerm s t) ty
-updateTerm s (Syntax.BindTerm m p t1 t2)  = Syntax.BindTerm (updateType s m) p (updateTerm s t1) (updateTerm s t2)
-updateTerm s (Syntax.CaseTerm m t rs)     = Syntax.CaseTerm (updateType s m) (updateTerm s t) (map (updateRule s) rs)
-updateTerm s (Syntax.VariableTerm p x)    = Syntax.VariableTerm p x
-updateTerm s (Syntax.SeqTerm t1 t2)       = Syntax.SeqTerm (updateTerm s t1) (updateTerm s t2)
-updateTerm s (Syntax.TupleTerm p ms xs)   = Syntax.TupleTerm p (map (updateType s) ms) (map (updateTerm s) xs)
-updateTerm s (Syntax.UnitTerm p)          = Syntax.UnitTerm p
-updateTerm s (Syntax.UpperTerm p ts ty x) = Syntax.UpperTerm p (map (updateType s) ts) (updateType s ty) x
+concreteTerm s (Syntax.ApplyTerm m t1 t2)   = Syntax.ApplyTerm (concreteType s m) (concreteTerm s t1) (concreteTerm s t2)
+concreteTerm s (Syntax.AscribeTerm p t ty)  = Syntax.AscribeTerm p (concreteTerm s t) ty
+concreteTerm s (Syntax.BindTerm m p t1 t2)  = Syntax.BindTerm (concreteType s m) p (concreteTerm s t1) (concreteTerm s t2)
+concreteTerm s (Syntax.CaseTerm m t rs)     = Syntax.CaseTerm (concreteType s m) (concreteTerm s t) (map (concreteRule s) rs)
+concreteTerm s (Syntax.VariableTerm p x)    = Syntax.VariableTerm p x
+concreteTerm s (Syntax.SeqTerm t1 t2)       = Syntax.SeqTerm (concreteTerm s t1) (concreteTerm s t2)
+concreteTerm s (Syntax.TupleTerm p ms xs)   = Syntax.TupleTerm p (map (concreteType s) ms) (map (concreteTerm s) xs)
+concreteTerm s (Syntax.UnitTerm p)          = Syntax.UnitTerm p
+concreteTerm s (Syntax.UpperTerm p ts ty x) = Syntax.UpperTerm p (map (concreteType s) ts) (concreteType s ty) x
 
 
-updateRule :: Sigma -> (Syntax.Pat, Syntax.Term) -> (Syntax.Pat, Syntax.Term)
+concreteRule :: Sigma -> (Syntax.Pat, Syntax.Term) -> (Syntax.Pat, Syntax.Term)
 
-updateRule s (p, t) = (p, updateTerm s t)
+concreteRule s (p, t) = (p, concreteTerm s t)
 
+
+-- Replaces any metavariables found in sigma. If the metavariable is not in
+-- sigma, it is replaced with ().
+
+concreteType :: Sigma -> Type.Type -> Type.Type
+
+concreteType s (Type.Arrow t1 t2)    = Type.Arrow (concreteType s t1) (concreteType s t2)
+concreteType s (Type.Metavariable x) = maybe Type.Unit id (sigmaLookup s x)
+concreteType s (Type.Tuple ts)       = Type.Tuple (map (concreteType s) ts)
+concreteType s Type.Unit             = Type.Unit
+concreteType s (Type.Variable x)     = Type.Variable x
+concreteType s (Type.Variant x ts)   = Type.Variant x (map (concreteType s) ts)
+
+
+isConcreteType :: Type.Type -> Bool
+
+isConcreteType (Type.Arrow t1 t2)    = isConcreteType t1 && isConcreteType t2
+isConcreteType (Type.Metavariable x) = False
+isConcreteType (Type.Tuple ts)       = all isConcreteType ts
+isConcreteType Type.Unit             = True
+isConcreteType (Type.Variable x)     = True
+isConcreteType (Type.Variant x ts)   = all isConcreteType ts
+
+
+
+-- Replaces any metavariables found in sigma. If the metavariable is not in
+-- sigma, it is returned.
 
 updateType :: Sigma -> Type.Type -> Type.Type
 
 updateType s (Type.Arrow t1 t2)    = Type.Arrow (updateType s t1) (updateType s t2)
-updateType s (Type.Metavariable x) = maybe Type.Unit id (sigmaLookup s x)
+updateType s (Type.Metavariable x) = maybe (Type.Metavariable x) id (sigmaLookup s x)
 updateType s (Type.Tuple ts)       = Type.Tuple (map (updateType s) ts)
 updateType s Type.Unit             = Type.Unit
 updateType s (Type.Variable x)     = Type.Variable x
@@ -120,7 +154,7 @@ typeCheckPat s ty (Syntax.AscribePat p ty2) =
     Nothing -> Left undefined
     Just (ty, s) -> typeCheckPat s ty p
 
-typeCheckPat s ty (Syntax.LowerPat x) = Right (ty, s)
+typeCheckPat s ty (Syntax.LowerPat _ x) = Right (ty, s)
 
 typeCheckPat s ty (Syntax.TuplePat tys ps) =
   case unify s ty (Type.Tuple tys) of
@@ -141,11 +175,11 @@ typeCheckPat s ty (Syntax.UnitPat _) =
 
 typeCheckPat s ty (Syntax.UpperPat pos tys ty2 x ps) =
   case unify s ty ty2 of
-    Nothing -> errorMsg pos ty ty2
+    Nothing -> errorMsg s pos ty ty2
     Just (ty, s) ->
       case typeCheckPats s tys ps of
         Left msg -> Left msg
-        Right (tys, s) -> Right (updateType s ty, s)
+        Right (tys, s) -> Right (ty, s)
 
 
 typeCheckPats :: Sigma -> [Type.Type] -> [Syntax.Pat] -> Either String ([Type.Type], Sigma)
@@ -165,21 +199,17 @@ typeCheckPats s _ _ = unreachable
 
 -- We pass in an expected type forward to catch type errors as soon as possible.
 
-typeCheckTerm :: Gamma -> Sigma -> Type.Type -> Syntax.Term -> Either String (Type.Type, Sigma)
+typeCheckTerm :: Gamma -> Sigma -> Type.Type -> Syntax.Term -> Either String Sigma
 
-typeCheckTerm g s ty (Syntax.ApplyTerm m t1 t2) =
-  case typeCheckTerm g s (Type.Arrow m ty) t1 of
+typeCheckTerm g s ty2 (Syntax.ApplyTerm ty1 t1 t2) =
+  case typeCheckTerm g s (Type.Arrow ty1 ty2) t1 of
     Left msg -> Left msg
-    Right (Type.Arrow ty1 ty2, s) ->
-      case typeCheckTerm g s ty1 t2 of
-        Left msg -> Left msg
-        Right (ty1, s) -> return (updateType s ty2, s)
-    Right (_, s) -> unreachable
+    Right s -> typeCheckTerm g s ty1 t2
 
 typeCheckTerm g s ty (Syntax.AscribeTerm p t ty2) =
   let ty2' = Syntax.typType ty2
    in case unify s ty ty2' of
-        Nothing -> errorMsg p ty ty2'
+        Nothing -> errorMsg s p ty ty2'
         Just (ty, s) -> typeCheckTerm g s ty t
 
 typeCheckTerm g s ty (Syntax.BindTerm tyP p t1 t2) =
@@ -188,7 +218,10 @@ typeCheckTerm g s ty (Syntax.BindTerm tyP p t1 t2) =
     Right (tyP, s) ->
       case typeCheckTerm g s tyP t1 of
         Left msg -> Left msg
-        Right (ty1, s) -> typeCheckTerm (gammaWithPat g p ty1) s (updateType s ty) t2
+        Right s ->
+          case gammaWithPat g s p tyP of
+            Left msg -> Left msg
+            Right g -> typeCheckTerm g s ty t2
 
 typeCheckTerm g s ty (Syntax.CaseTerm ty2 t rs) =
   case typeCheckRulePats s ty2 rs of
@@ -196,71 +229,67 @@ typeCheckTerm g s ty (Syntax.CaseTerm ty2 t rs) =
     Right (ty2, s) ->
       case typeCheckTerm g s ty2 t of
         Left msg -> Left msg
-        Right (ty2, s) -> typeCheckRules g s ty ty2 rs
+        Right s -> typeCheckRules g s ty ty2 rs
   where typeCheckRulePats s ty [] = Right (ty, s)
         typeCheckRulePats s ty ((p, _) : rs) =
           case typeCheckPat s ty p of
             Left msg -> Left msg
             Right (ty, s) -> typeCheckRulePats s ty rs
-        typeCheckRules g s ty1 ty2 [] = Right (ty1, s)
+        typeCheckRules g s ty1 ty2 [] = Right s
         typeCheckRules g s ty1 ty2 (r:rs) =
           case typeCheckRule g s ty1 ty2 r of
             Left msg -> Left msg
-            Right (ty1, s) -> typeCheckRules g s ty1 ty2 rs
+            Right s -> typeCheckRules g s ty1 ty2 rs
         typeCheckRule g s ty1 ty2 (p, t) =
-          typeCheckTerm (gammaWithPat g p ty2) s ty1 t
+          case gammaWithPat g s p ty2 of
+            Left msg -> Left msg
+            Right g -> typeCheckTerm g s ty1 t
 
 typeCheckTerm g s ty (Syntax.SeqTerm t1 t2) =
   case typeCheckTerm g s Type.Unit t1 of
     Left msg -> Left msg
-    Right (_, s) -> typeCheckTerm g s ty t2
+    Right s -> typeCheckTerm g s ty t2
 
 typeCheckTerm g s ty (Syntax.TupleTerm p ms xs) =
   case unify s ty (Type.Tuple ms) of
-    Nothing -> errorMsg p ty (Type.Tuple ms)
-    Just (Type.Tuple ts, s) ->
-      case typeCheckTerms g s ts xs of
-        Left msg -> Left msg
-        Right (tys, s) -> Right (Type.Tuple tys, s)
+    Nothing -> errorMsg s p ty (Type.Tuple ms)
+    Just (Type.Tuple tys, s) -> typeCheckTerms g s tys xs
     Just _ -> unreachable
 
 typeCheckTerm g s t (Syntax.UnitTerm p) =
   case unify s t Type.Unit of
-    Nothing -> errorMsg p t Type.Unit
-    Just (t, s) -> Right (t, s)
+    Nothing -> errorMsg s p t Type.Unit
+    Just (t, s) -> Right s
 
 typeCheckTerm g s ty (Syntax.UpperTerm p ts ty2 x) =
   case unify s ty ty2 of
-    Nothing -> errorMsg p ty ty2
-    Just (ty, s) -> Right (ty, s)
+    Nothing -> errorMsg s p ty ty2
+    Just (ty, s) -> Right s
 
 typeCheckTerm g s ty (Syntax.VariableTerm p x) =
   case unify s ty (gammaGet g x) of
-    Nothing -> errorMsg p ty (gammaGet g x)
-    Just (ty, s) -> Right (ty, s)
+    Nothing -> errorMsg s p ty (gammaGet g x)
+    Just (ty, s) -> Right s
 
 
-typeCheckTerms :: Gamma -> Sigma -> [Type.Type] -> [Syntax.Term] -> Either String ([Type.Type], Sigma)
+typeCheckTerms :: Gamma -> Sigma -> [Type.Type] -> [Syntax.Term] -> Either String Sigma
 
-typeCheckTerms g s [] [] = Right ([], s)
+typeCheckTerms g s [] [] = Right s
 
 typeCheckTerms g s (ty:tys) (x:xs) =
   case typeCheckTerm g s ty x of
     Left msg -> Left msg
-    Right (ty, s) ->
-      case typeCheckTerms g s tys xs of
-        Left msg -> Left msg
-        Right (tys, s) -> Right (ty:tys, s)
+    Right s -> typeCheckTerms g s tys xs
 
 typeCheckTerms g s _ _ = unreachable
 
 
-errorMsg :: Syntax.Pos -> Type.Type -> Type.Type -> Either String a
+errorMsg :: Sigma -> Syntax.Pos -> Type.Type -> Type.Type -> Either String a
 
-errorMsg (Syntax.Pos filename line col) t1 t2 =
-  Left $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": " ++ "Type mismatch. Expected type " ++ s1 ++ ". Given type " ++ s2 ++ "."
-  where (s1, r) = showType [] t1
-        (s2, _) = showType r  t2
+errorMsg s (Syntax.Pos filename line col) t1 t2 =
+  Left $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": " ++ "Type mismatch. Expected type " ++ m1 ++ ". Given type " ++ m2 ++ "."
+  where (m1, r) = showType [] $ updateType s t1
+        (m2, _) = showType r  $ updateType s t2
 
 
 -- We keep a stack of metavariables, which is those metavariables already given

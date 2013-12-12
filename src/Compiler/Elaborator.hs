@@ -191,7 +191,7 @@ elaboratePats ds ps m = elaboratePatsAlt ds ps m (return $ Lambda.Unreachable un
 
 elaboratePatAlt :: Lambda.ValueIdent -> Syntax.Pat -> Result Lambda.Term -> Result Lambda.Term -> Result Lambda.Term
 elaboratePatAlt d (Syntax.AscribePat p ty) m1 m2 = elaboratePatAlt d p m1 m2
-elaboratePatAlt d (Syntax.LowerPat s)      m1 m2 = withLower s d m1
+elaboratePatAlt d (Syntax.LowerPat _ s)    m1 m2 = withLower s d m1
 elaboratePatAlt d (Syntax.TuplePat _ ps)   m1 m2 = do ds <- mapM gen ps
                                                       t <- elaboratePatsAlt ds ps m1 m2
                                                       return $ Lambda.UntupleTerm ds (Lambda.VariableTerm d) t

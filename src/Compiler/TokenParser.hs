@@ -336,8 +336,9 @@ pat2 =
               case t of
                 UnderbarToken -> return Syntax.UnderbarPat
                 _ -> failure
-         , do x <- lower
-              return $ Syntax.LowerPat x
+         , do pos <- position
+              x <- lower
+              return $ Syntax.LowerPat pos x
          , pat3
          ]
 
