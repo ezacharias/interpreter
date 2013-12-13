@@ -1,5 +1,6 @@
 module Compiler.Meta where
 
+import Control.Monad (liftM)
 import           Data.Maybe      (fromJust)
 
 import           Compiler.Syntax
@@ -9,17 +10,19 @@ import qualified Compiler.Type   as Type
 -- We also add the type to every upper-case variable so the type-checker does
 -- not have to look it up.
 
-data Result a = Normal a
-              | Next         (Int -> Result a)
-              | Arity String (([String], Type.Type) -> Result a)
-              | Constructor String (([String], [Type.Type], Type.Type) -> Result a)
+
+data Result a where
+  Return      :: a -> Result a
+  Bind        :: Result b -> (b -> Result a) -> Result a
+  Gen         :: Result Int
+  Function    :: String -> Result ([String], Type.Type)
+  Constructor :: String -> Result ([String], [Type.Type], Type.Type)
 
 instance Monad Result where
-  return = Normal
-  Normal x        >>= f = f x
-  Next k          >>= f = Next    (\ x -> k x >>= f)
-  Arity s k       >>= f = Arity s (\ x -> k x >>= f)
-  Constructor s k >>= f = Constructor s (\ x -> k x >>= f)
+  return = Return
+  Return x >>= f = f x
+  Bind m g >>= f = Bind m (\ x -> g x >>= f)
+  m        >>= f = Bind m f
 
 env :: [(String, ([String], Type.Type))]
 env = [ ("Exit", ([], Type.Variant "Output" []))
@@ -61,7 +64,7 @@ constructors r (SumDec _ s1 ss rs) = foldl f r rs
 constructors r (TagDec _ _ _) = r
 
 genMeta :: a -> Result Type.Type
-genMeta _ = Next (Normal . Type.Metavariable)
+genMeta _ = liftM Type.Metavariable Gen
 
 -- data Dec = FunDec Pos String [String] [Pat] Typ Term
 dec :: [Dec] -> [(String, ([String], [Type.Type], Type.Type))] -> [(String, ([String], Type.Type))] -> Int -> Dec -> ([Dec], Int)
@@ -69,10 +72,12 @@ dec ds g r n (FunDec pos s ss ps t e) = check n m
   where m = do ps' <- mapM pat ps
                t' <- term e
                return $ FunDec pos s ss ps' t t' : ds
-        check n (Normal e)        = (e, n)
-        check n (Next k)          = check (n + 1) (k n)
-        check n (Arity s k)       = check n (k (lookupJust s r))
-        check n (Constructor s k) = check n (k (lookupJust s g))
+        check n (Return e)               = (e, n)
+        check n (Bind Gen k)             = check (n + 1) (k n)
+        check n (Bind (Function s) k)    = check n (k (lookupJust s r))
+        check n (Bind (Constructor s) k) = check n (k (lookupJust s g))
+        check n (Bind (Return _) _)      = error "Compiler.Meta.dec: unreachable"
+        check n (Bind (Bind _ _) _)      = error "Compiler.Meta.dec: unreachable"
 dec ds g r n (SumDec pos s ss rs) = (SumDec pos s ss rs : ds, n)
 dec ds g r n (TagDec pos s ty)    = (TagDec pos s ty : ds, n)
 
@@ -103,7 +108,7 @@ term (TupleTerm p ts es)  = do ts' <-  mapM genMeta ts
                                es' <- mapM term es
                                return $ TupleTerm p ts' es'
 term (UnitTerm p)         = return $ UnitTerm p
-term (UpperTerm p _ _ s)  = do (ss, ty) <- Arity s Normal
+term (UpperTerm p _ _ s)  = do (ss, ty) <- Function s
                                ts' <- mapM genMeta ss
                                ty' <- return $ Type.rename (zip ss ts') ty
                                return $ UpperTerm p ts' ty' s
@@ -119,7 +124,7 @@ pat (TuplePat ms ps)  = do ms' <- mapM genMeta ms
 pat UnderbarPat       = return UnderbarPat
 pat (UnitPat pos)     = return $ UnitPat pos
 pat (UpperPat pos _ _ x ps)
-                      = do (ss, tys, ty) <- Constructor x Normal
+                      = do (ss, tys, ty) <- Constructor x
                            ss' <- mapM genMeta ss
                            ty' <- return $ Type.rename (zip ss ss') ty
                            tys' <- return $ map (Type.rename (zip ss ss')) tys
