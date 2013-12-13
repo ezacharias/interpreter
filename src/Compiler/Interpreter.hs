@@ -42,6 +42,15 @@ data Result a = Normal a
               | GetTypeEnvironment ([(TypeIdent, Type)] -> Result a)
               | GetValueEnvironment ([(ValueIdent, Value)] -> Result a)
 
+instance Functor Result where
+  fmap f (Normal x)              = Normal (f x)
+  fmap f (Escape t v k)          = Escape t v (fmap f . k)
+  fmap f (LookupFunction d k)    = LookupFunction d (fmap f . k)
+  fmap f (LookupTag d k)         = LookupTag d (fmap f . k)
+  fmap f (LookupVariant d k)     = LookupVariant d (fmap f . k)
+  fmap f (GetTypeEnvironment k)  = GetTypeEnvironment (fmap f . k)
+  fmap f (GetValueEnvironment k) = GetValueEnvironment (fmap f . k)
+
 instance Show a => Show (Result a) where
   show (Normal x)              = "normal: " ++ show x
   show (Escape _ _ _)          = "escape"

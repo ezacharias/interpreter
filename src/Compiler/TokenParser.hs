@@ -12,6 +12,7 @@ module Compiler.TokenParser
   , tokenParser
   ) where
 
+import Control.Applicative (Applicative, pure, (<*>), Alternative, empty, (<|>))
 import           Control.Monad
 
 import qualified Compiler.Syntax as Syntax
@@ -24,12 +25,6 @@ data TokenParser a = TokenParserFinished a
                    | TokenParserTokenRequest (Maybe (String, Position, Token) -> TokenParser a)
                    | TokenParserError Position String
 
-instance Monad TokenParser where
-  return = TokenParserFinished
-  TokenParserFinished x     >>= f = f x
-  TokenParserTokenRequest k >>= f = TokenParserTokenRequest (k >=> f)
-  TokenParserError pos msg  >>= f = TokenParserError pos msg
-
 tokenParser :: TokenParser Syntax.Program
 tokenParser = runAmbiguousParser ambiguousParser TokenParserFinished
 
@@ -40,6 +35,17 @@ instance Monad AmbiguousParser where
   return x = AmbiguousParser (\ k -> k x)
   AmbiguousParser g >>= f = AmbiguousParser check
     where check k = g (\ x -> runAmbiguousParser (f x) k)
+
+instance Functor AmbiguousParser where
+  fmap f (AmbiguousParser g) = AmbiguousParser (\ k -> g (k . f))
+
+instance Applicative AmbiguousParser where
+  pure x = AmbiguousParser (\ k -> k x)
+  AmbiguousParser f <*> AmbiguousParser x = AmbiguousParser (\ k -> f (\ f' -> x (k . f')))
+
+instance Alternative AmbiguousParser where
+  empty = failure
+  (<|>) = alt
 
 runAmbiguousParser :: AmbiguousParser a -> (a -> TokenParser Syntax.Program) -> TokenParser Syntax.Program
 runAmbiguousParser (AmbiguousParser f) = f
@@ -60,6 +66,7 @@ alt p1 p2 = AmbiguousParser (\ k -> check (runAmbiguousParser p1 k) (runAmbiguou
         check (TokenParserTokenRequest k)  (TokenParserError _ _)       = TokenParserTokenRequest k
         check (TokenParserError pos msg)   (TokenParserFinished x)      = TokenParserFinished x
         check (TokenParserError pos msg)   (TokenParserTokenRequest k)  = TokenParserTokenRequest k
+        check (TokenParserError pos1 msg1) (TokenParserError pos2 "")   = TokenParserError pos2 msg1
         check (TokenParserError pos1 msg1) (TokenParserError pos2 msg2) = TokenParserError pos2 msg2
 
 choice :: [AmbiguousParser a] -> AmbiguousParser a
@@ -70,19 +77,19 @@ many p = choice [ liftM2 (:) p (many p)
                 , return []
                 ]
 
-many1 :: AmbiguousParser a -> AmbiguousParser [a]
-many1 p = liftM2 (:) p (many p)
+some :: AmbiguousParser a -> AmbiguousParser [a]
+some p = liftM2 (:) p (many p)
 
 -- | The first token matched must be at the given column number.
 aligned :: Int -> AmbiguousParser a -> AmbiguousParser a
 aligned col1 p = AmbiguousParser (check . runAmbiguousParser p)
-  where check (TokenParserFinished x)     = error "Foo"
+  where check (TokenParserFinished x)     = TokenParserFinished x
         check (TokenParserTokenRequest k) = TokenParserTokenRequest (respond k)
         check (TokenParserError pos msg)  = TokenParserError pos msg
         respond k Nothing = k Nothing
         respond k (Just (filename, (line2, col2), tok))
            | col1 == col2 = k (Just (filename, (line2, col2), tok))
-           | otherwise    = TokenParserError (line2, col2) "Not properly aligned"
+           | otherwise    = TokenParserError (line2, col2) "Not properly aligned."
 
 -- | Every token must sit on the given line number.
 line :: Int -> AmbiguousParser a -> AmbiguousParser a
@@ -92,7 +99,7 @@ line line1 p = AmbiguousParser (check . runAmbiguousParser p)
         check (TokenParserError pos msg)  = TokenParserError pos msg
         respond k Nothing = k Nothing
         respond k (Just (filename, (line2, col2), tok))
-         | line1 == line2 = k (Just (filename, (line2, col2), tok))
+         | line1 == line2 = check $ k (Just (filename, (line2, col2), tok))
          | otherwise      = TokenParserError (line2, col2) "Not on the same line."
 
 ambiguousParser :: AmbiguousParser Syntax.Program
@@ -107,7 +114,7 @@ token = AmbiguousParser check
 position :: AmbiguousParser Syntax.Pos
 position = AmbiguousParser check
   where check k = TokenParserTokenRequest (response k)
-        response k Nothing = TokenParserError (0,0) "Parsing error."
+        response k Nothing = TokenParserError (0,0) "End of file."
         response k x@(Just (filename, (line, col), tok)) = test x (k (Syntax.Pos filename line col))
         test x (TokenParserTokenRequest k) = k x
         test _ (TokenParserFinished x) = error "Compiler.TokenParser.position: impossible"
@@ -123,7 +130,7 @@ eof :: AmbiguousParser ()
 eof = AmbiguousParser check
   where check k = TokenParserTokenRequest (response k)
         response k Nothing = k ()
-        response k (Just (filename, pos, tok)) = TokenParserError pos "Parsing error. Expected end of file."
+        response k (Just (filename, pos, tok)) = TokenParserError pos "Expected end of file."
 
 program :: AmbiguousParser Syntax.Program
 program = do
@@ -132,10 +139,7 @@ program = do
   return $ Syntax.Program xs
 
 dec :: AmbiguousParser Syntax.Dec
-dec = choice [ funDec
-             , sumDec
-             , tagDec
-             ]
+dec = funDec <|> sumDec <|> tagDec
 
 upper :: AmbiguousParser Syntax.Ident
 upper = do
@@ -230,8 +234,7 @@ seqStm = do
 stm1 :: AmbiguousParser Syntax.Term
 stm1 =
   choice [ caseStm
-         , do Syntax.Pos _ l _ <- position
-              line l term0
+         , term0
          ]
 
 caseStm :: AmbiguousParser Syntax.Term
@@ -239,7 +242,7 @@ caseStm = do
   Syntax.Pos _ _ c <- position
   keyword "case"
   t <- term2
-  rs <- many1 $ aligned (c + 2) rule
+  rs <- some $ aligned (c + 2) rule
   return $ Syntax.CaseTerm Type.Unit t rs
 
 rule :: AmbiguousParser (Syntax.Pat, Syntax.Term)
@@ -303,7 +306,7 @@ exp4 = do
          , do pos <- position
               leftParen
               t <- term0
-              ts <- many1 $ comma >> term0
+              ts <- some $ comma >> term0
               rightParen
               return $ Syntax.TupleTerm pos (map (\ _ -> Type.Unit) (t:ts)) (t:ts)
          ]
@@ -350,7 +353,7 @@ pat3 =
               return $ Syntax.UnitPat pos
          , do leftParen
               p <- pat0
-              ps <- many1 $ comma >> pat0
+              ps <- some $ comma >> pat0
               rightParen
               return $ Syntax.TuplePat (map (\ _ -> Type.Unit) (p:ps)) (p:ps)
          , do leftParen
@@ -390,7 +393,7 @@ tupleTyp :: AmbiguousParser Syntax.Typ
 tupleTyp = do
   leftParen
   ty <- typ0
-  tys <- many1 $ comma >> typ0
+  tys <- some $ comma >> typ0
   rightParen
   return $ Syntax.TupleTyp (ty:tys)
 
@@ -418,8 +421,7 @@ undefinedPosition = Syntax.Pos "" 0 0
 
 sumDec :: AmbiguousParser Syntax.Dec
 sumDec = do
-  pos <- position
-  Syntax.Pos _ _ c <- position
+  pos@(Syntax.Pos _ l c) <- position
   keyword "sum"
   e1 <- upper
   e2 <- choice [ do leftBracket

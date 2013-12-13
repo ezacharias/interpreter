@@ -302,12 +302,12 @@ showType :: [Type.Metavariable] -> Type.Type -> (String, [Type.Metavariable])
 showType r (Type.Arrow t1@(Type.Arrow _ _) t2) =
   let (s1, r')  = showType r  t1
       (s2, r'') = showType r' t2
-   in ("(" ++ s1 ++ ")" ++ " -> " ++ s2, r'')
+   in ("(" ++ s1 ++ ")" ++ " ⟶ " ++ s2, r'')
 
 showType r (Type.Arrow t1 t2) =
   let (s1, r')  = showType r  t1
       (s2, r'') = showType r' t2
-   in (s1 ++ " -> " ++ s2, r'')
+   in (s1 ++ " ⟶ " ++ s2, r'')
 
 showType r (Type.Metavariable x) = f 0 r
   where f n []                = (c n, [x])

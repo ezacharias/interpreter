@@ -1,13 +1,14 @@
 -- Throw(tag : Tag⟦a, b⟧)(x : a) : b
--- Catch(tag : Tag⟦a, b⟧, f : () ⟶ c)(g : a ⟶ (b ⟶ c) ⟶ c) ⟶ c
+-- Catch(tag : Tag⟦a, b⟧, f : () ⟶ c)(g : a ⟶ (b ⟶ c) ⟶ c) : c
 -- Unreachable : a
 -- Exit : Output
+
+new T : Tag⟦(), Bool⟧
+
 
 sum Bool
   False
   True
-
-new T : Tag⟦(), Bool⟧
 
 Main() : Output
   bind (x, y) : ((), ()) to (Unreachable, Unreachable)
