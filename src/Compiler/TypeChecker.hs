@@ -15,12 +15,13 @@ about how to do that.
 
 module Compiler.TypeChecker where
 
-import           Data.IntMap             (IntMap)
-import qualified Data.IntMap             as IntMap
-import           Data.List               (intersperse)
+import           Control.Monad   (MonadPlus, mzero)
+import           Data.IntMap     (IntMap)
+import qualified Data.IntMap     as IntMap
+import           Data.List       (intersperse)
 
-import qualified Compiler.Syntax         as Syntax
-import qualified Compiler.Type           as Type
+import qualified Compiler.Syntax as Syntax
+import qualified Compiler.Type   as Type
 
 
 -- The program syntax starts out containing type metavariables. It either
@@ -344,71 +345,60 @@ showTypes r (t:ts) = let (s, r') = showType r t
 -- will unify. A concrete type and a metavariable will record the concrete type
 -- in sigma as a constraint.
 
-unify :: Sigma -> Type.Type -> Type.Type -> Maybe (Type.Type, Sigma)
+unify :: MonadPlus m => Sigma -> Type.Type -> Type.Type -> m (Type.Type, Sigma)
 
-unify s (Type.Arrow t1 t2) (Type.Arrow t3 t4) =
-  case unify s t1 t3 of
-    Nothing -> Nothing
-    Just (t5, s) ->
-      case unify s t2 t4 of
-        Nothing -> Nothing
-        Just (t6, s) -> Just (Type.Arrow t5 t6, s)
+unify s (Type.Arrow t1 t2) (Type.Arrow t3 t4) = do
+  (t5, s) <- unify s t1 t3
+  (t6, s) <- unify s t2 t4
+  return (Type.Arrow t5 t6, s)
 
 unify s (Type.Metavariable x1) (Type.Metavariable x2) | x1 == x2 =
-  Just (Type.Metavariable x1, s)
+  return (Type.Metavariable x1, s)
 
 unify s (Type.Metavariable x1) (Type.Metavariable x2) =
   case (sigmaLookup s x1, sigmaLookup s x2) of
-    (Nothing, Nothing) -> Just (Type.Metavariable x2, sigmaBind s x1 (Type.Metavariable x2))
-    (Nothing, Just t2) -> Just (t2, sigmaBind s x1 t2)
-    (Just t1, Nothing) -> Just (t1, sigmaBind s x2 t1)
-    (Just t1, Just t2) -> case unify s t1 t2 of
-                            Nothing -> Nothing
-                            Just (t3, s) -> Just (t3, sigmaBind (sigmaBind s x1 t3) x2 t3)
+    (Nothing, Nothing) -> return (Type.Metavariable x2, sigmaBind s x1 (Type.Metavariable x2))
+    (Nothing, Just t2) -> return (t2, sigmaBind s x1 t2)
+    (Just t1, Nothing) -> return (t1, sigmaBind s x2 t1)
+    (Just t1, Just t2) -> do (t3, s) <- unify s t1 t2
+                             return (t3, sigmaBind (sigmaBind s x1 t3) x2 t3)
 
 unify s (Type.Metavariable x1) t2 =
   case sigmaLookup s x1 of
-    Nothing -> Just (t2, sigmaBind s x1 t2)
-    Just t1 ->
-      case unify s t1 t2 of
-        Nothing -> Nothing
-        Just (t3, s) -> Just (t3, sigmaBind s x1 t3)
+    Nothing -> return (t2, sigmaBind s x1 t2)
+    Just t1 -> do (t3, s) <- unify s t1 t2
+                  return (t3, sigmaBind s x1 t3)
 
 unify s t1 (Type.Metavariable x2) =
   unify s (Type.Metavariable x2) t1
 
-unify s (Type.Tuple tys1) (Type.Tuple tys2) =
-  case unifys s tys1 tys2 of
-    Nothing -> Nothing
-    Just (tys3, s) -> Just (Type.Tuple tys3, s)
+unify s (Type.Tuple tys1) (Type.Tuple tys2) = do
+  (tys3, s) <- unifys s tys1 tys2
+  return (Type.Tuple tys3, s)
 
 unify s Type.Unit Type.Unit =
-  Just (Type.Unit, s)
+  return (Type.Unit, s)
 
 unify s (Type.Variable x1) (Type.Variable x2) | x1 == x2 =
-  Just (Type.Variable x1, s)
+  return (Type.Variable x1, s)
 
-unify s (Type.Variant x1 t1s) (Type.Variant x2 t2s) | x1 == x2 =
-  case unifys s t1s t2s of
-    Nothing -> Nothing
-    Just (t3s, s) -> Just (Type.Variant x1 t3s, s)
+unify s (Type.Variant x1 t1s) (Type.Variant x2 t2s) | x1 == x2 = do
+  (t3s, s) <- unifys s t1s t2s
+  return (Type.Variant x1 t3s, s)
 
-unify s _ _ = Nothing
+unify s _ _ = mzero
 
 
-unifys :: Sigma -> [Type.Type] -> [Type.Type] -> Maybe ([Type.Type], Sigma)
+unifys :: MonadPlus m => Sigma -> [Type.Type] -> [Type.Type] -> m ([Type.Type], Sigma)
 
 unifys s [] [] = return ([], s)
 
-unifys s (t1:t1s) (t2:t2s) =
-  case unify s t1 t2 of
-    Nothing -> Nothing
-    Just (t3, s) ->
-      case unifys s t1s t2s of
-        Nothing -> Nothing
-        Just (t3s, s) -> return (t3:t3s, s)
+unifys s (t1:t1s) (t2:t2s) = do
+  (t3, s) <- unify s t1 t2
+  (t3s, s) <- unifys s t1s t2s
+  return (t3:t3s, s)
 
-unifys s _ _ = Nothing
+unifys s _ _ = mzero
 
 
 -- Table from metavariables to types.
