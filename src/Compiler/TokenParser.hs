@@ -26,11 +26,11 @@ data TokenParser a = TokenParserFinished a
                    | TokenParserError Position String
 
 tokenParser :: TokenParser Syntax.Program
-tokenParser = runAmbiguousParser ambiguousParser (\ x _ -> TokenParserFinished x) Nothing
+tokenParser = runAmbiguousParser ambiguousParser (\ x _ _ -> TokenParserFinished x) 0 Nothing
 
 -- | An ambiguous parser takes a continuation, but may call the continuation multiple times with different results.
-newtype AmbiguousParser a = AmbiguousParser ((a -> Maybe Int -> TokenParser Syntax.Program)
-                                                -> Maybe Int -> TokenParser Syntax.Program)
+newtype AmbiguousParser a = AmbiguousParser ((a -> Int -> Maybe Int -> TokenParser Syntax.Program)
+                                                -> Int -> Maybe Int -> TokenParser Syntax.Program)
 
 instance Monad AmbiguousParser where
   return x = AmbiguousParser (\ k -> k x)
@@ -48,17 +48,17 @@ instance Alternative AmbiguousParser where
   empty = failure
   (<|>) = alt
 
-runAmbiguousParser :: AmbiguousParser a -> (a -> Maybe Int -> TokenParser Syntax.Program) -> Maybe Int -> TokenParser Syntax.Program
+runAmbiguousParser :: AmbiguousParser a -> (a -> Int -> Maybe Int -> TokenParser Syntax.Program) -> Int -> Maybe Int -> TokenParser Syntax.Program
 runAmbiguousParser (AmbiguousParser f) = f
 
 failurePos :: Syntax.Pos -> AmbiguousParser a
-failurePos (Syntax.Pos _ line col) = AmbiguousParser (\ k _ -> TokenParserError (line, col) "")
+failurePos (Syntax.Pos _ line col) = AmbiguousParser (\ _ _ _ -> TokenParserError (line, col) "")
 
 failure :: AmbiguousParser a
 failure = failurePos =<< position
 
 alt :: AmbiguousParser a -> AmbiguousParser a -> AmbiguousParser a
-alt p1 p2 = AmbiguousParser (\ k c -> check (runAmbiguousParser p1 k c) (runAmbiguousParser p2 k c))
+alt p1 p2 = AmbiguousParser (\ k l c -> check (runAmbiguousParser p1 k l c) (runAmbiguousParser p2 k l c))
   where check (TokenParserFinished x)      (TokenParserFinished _)      = TokenParserFinished x
         check (TokenParserFinished x)      (TokenParserTokenRequest _)  = error "Compiler.TokenParser.alt: impossible"
         check (TokenParserFinished x)      (TokenParserError _ _)       = TokenParserFinished x
@@ -83,42 +83,31 @@ some p = liftM2 (:) p (many p)
 
 -- | The first token matched must be at the given column number.
 indented :: Int -> AmbiguousParser a -> AmbiguousParser a
-indented n p = AmbiguousParser check
-  where check k Nothing              = runAmbiguousParser p (\ x _ -> k x Nothing) (Just n)
-        check k (Just c) | n == c    = runAmbiguousParser p k (Just n)
-        check k (Just c) | otherwise = error "Improperly nested indentation requirements."
-
--- | Every token must sit on the given line number.
-line :: Int -> AmbiguousParser a -> AmbiguousParser a
-line n p = p
-{-
-line line1 p = AmbiguousParser (check . runAmbiguousParser p)
-  where check (TokenParserFinished x)     = TokenParserFinished x
-        check (TokenParserTokenRequest k) = TokenParserTokenRequest (respond k)
-        check (TokenParserError pos msg)  = TokenParserError pos msg
-        respond k Nothing = k Nothing
-        respond k (Just (filename, (line2, col2), tok))
-         | line1 == line2 = check $ k (Just (filename, (line2, col2), tok))
-         | otherwise      = TokenParserError (line2, col2) "Not on the same line."
--}
+indented n p = do Syntax.Pos _ l1 _ <- position
+                  AmbiguousParser (check l1)
+  where check l1 k l2 Nothing              = runAmbiguousParser p (\ x _ _ -> k x l2 Nothing) l1 (Just n)
+        check l1 k l2 (Just c) | n == c    = runAmbiguousParser p (\ x _ c -> k x l2 c) l1 (Just n)
+        check l1 k l2 (Just c) | otherwise = error "Improperly nested indentation requirements."
 
 ambiguousParser :: AmbiguousParser Syntax.Program
 ambiguousParser = program
 
 token :: AmbiguousParser Token
 token = AmbiguousParser check
-  where check k c = TokenParserTokenRequest (response k c)
-        response k _        Nothing                          = TokenParserError (0,0) "Parsing error."
-        response k Nothing   (Just (filename, pos,     tok)) = k tok Nothing
-        response k (Just c1) (Just (filename, (_, c2), tok))
-                                                 | c1 == c2  = k tok Nothing
-                                                 | otherwise = TokenParserError (0,0) "Parsing error."
+  where check k l c = TokenParserTokenRequest (response k l c)
+        response k _ _        Nothing                          = TokenParserError (0,0) "Parsing error."
+        response k l1 Nothing   (Just (filename, (l2, c2),     tok))
+          | l1 == l2 = k tok l2 Nothing
+          | otherwise = TokenParserError (l2, c2) "Parsing error."
+        response k l1 (Just c1) (Just (filename, (l2, c2), tok))
+          | l1 == l2 && c1 == c2  = k tok l2 Nothing
+          | otherwise = TokenParserError (l2, c2) "Parsing error."
 
 position :: AmbiguousParser Syntax.Pos
 position = AmbiguousParser check
-  where check k c = TokenParserTokenRequest (response k c)
-        response k c Nothing = TokenParserError (0,0) "End of file."
-        response k c x@(Just (filename, (line, col), tok)) = test x (k (Syntax.Pos filename line col) c)
+  where check k l c = TokenParserTokenRequest (response k l c)
+        response k l c Nothing = TokenParserError (0,0) "End of file."
+        response k l c x@(Just (filename, (line, col), tok)) = test x (k (Syntax.Pos filename line col) l c)
         test x (TokenParserTokenRequest k) = k x
         test _ (TokenParserFinished x) = error "Compiler.TokenParser.position: impossible"
         test x (TokenParserError pos msg) = TokenParserError pos msg
@@ -131,9 +120,9 @@ isToken tok1 = do
 
 eof :: AmbiguousParser ()
 eof = AmbiguousParser check
-  where check k c = TokenParserTokenRequest (response k c)
-        response k c Nothing = k () c
-        response k c (Just (filename, pos, tok)) = TokenParserError pos "Expected end of file."
+  where check k l c = TokenParserTokenRequest (response k l c)
+        response k l c Nothing = k () l c
+        response k l c (Just (filename, pos, tok)) = TokenParserError pos "Expected end of file."
 
 program :: AmbiguousParser Syntax.Program
 program = do
