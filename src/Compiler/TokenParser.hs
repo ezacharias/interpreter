@@ -22,7 +22,7 @@ import qualified Compiler.Type as Type
 -- | A token parser is a data structure which is incrementally fed tokens and returns the result.
 data TokenParser a = TokenParserFinished a
                    -- | Passed Nothing if at EOF.
-                   | TokenParserTokenRequest (Maybe (String, Position, Token) -> TokenParser a)
+                   | TokenParserTokenRequest ((String, Position, Maybe Token) -> TokenParser a)
                    | TokenParserError Position String
 
 tokenParser :: TokenParser Syntax.Program
@@ -95,19 +95,18 @@ ambiguousParser = program
 token :: AmbiguousParser Token
 token = AmbiguousParser check
   where check k l c = TokenParserTokenRequest (response k l c)
-        response k _ _        Nothing                          = TokenParserError (0,0) "Parsing error."
-        response k l1 Nothing   (Just (filename, (l2, c2),     tok))
+        response k _ _          (filename, (l2, c2), Nothing)    = TokenParserError (l2, c2) ""
+        response k l1 Nothing   (filename, (l2, c2), Just tok)
           | l1 == l2 = k tok l2 Nothing
-          | otherwise = TokenParserError (l2, c2) "Parsing error."
-        response k l1 (Just c1) (Just (filename, (l2, c2), tok))
+          | otherwise = TokenParserError (l2, c2) ""
+        response k l1 (Just c1) (filename, (l2, c2), Just tok)
           | l1 == l2 && c1 == c2  = k tok l2 Nothing
-          | otherwise = TokenParserError (l2, c2) "Parsing error."
+          | otherwise = TokenParserError (l2, c2) ""
 
 position :: AmbiguousParser Syntax.Pos
 position = AmbiguousParser check
   where check k l c = TokenParserTokenRequest (response k l c)
-        response k l c Nothing = TokenParserError (0,0) "End of file."
-        response k l c x@(Just (filename, (line, col), tok)) = test x (k (Syntax.Pos filename line col) l c)
+        response k l c x@(filename, (line, col), _) = test x (k (Syntax.Pos filename line col) l c)
         test x (TokenParserTokenRequest k) = k x
         test _ (TokenParserFinished x) = error "Compiler.TokenParser.position: impossible"
         test x (TokenParserError pos msg) = TokenParserError pos msg
@@ -121,8 +120,8 @@ isToken tok1 = do
 eof :: AmbiguousParser ()
 eof = AmbiguousParser check
   where check k l c = TokenParserTokenRequest (response k l c)
-        response k l c Nothing = k () l c
-        response k l c (Just (filename, pos, tok)) = TokenParserError pos "Expected end of file."
+        response k l c (filename, pos, Nothing)  = k () l c
+        response k l c (filename, pos, Just tok) = TokenParserError pos ""
 
 program :: AmbiguousParser Syntax.Program
 program = do
@@ -131,30 +130,35 @@ program = do
   return $ Syntax.Program xs
 
 dec :: AmbiguousParser Syntax.Dec
-dec = funDec <|> sumDec <|> tagDec
+dec = funDec <|> sumDec <|> tagDec <|> newDec <|> unitDec
 
 upper :: AmbiguousParser Syntax.Ident
 upper = do
+  pos <- position
   t <- token
   case t of
     UpperToken x -> return x
-    _ -> failure
+    _ -> failurePos pos
 
 leftBracket :: AmbiguousParser ()
 leftBracket = isToken LeftBracketToken
 
 lower :: AmbiguousParser Syntax.Ident
 lower = do
+  pos <- position
   t <- token
   case t of
     LowerToken x -> return x
-    _ -> failure
+    _ -> failurePos pos
 
 comma :: AmbiguousParser ()
 comma = isToken CommaToken
 
 colon :: AmbiguousParser ()
 colon = isToken ColonToken
+
+equals :: AmbiguousParser ()
+equals = isToken EqualsToken
 
 rightArrow :: AmbiguousParser ()
 rightArrow = isToken RightArrowToken
@@ -170,14 +174,15 @@ rightBracket = isToken RightBracketToken
 
 keyword :: String -> AmbiguousParser ()
 keyword s1 = do
+  pos <- position
   x <- token
   case x of
     LowerToken s2 | s1 == s2 -> return ()
-    _ -> failure
+    _ -> failurePos pos
 
 funDec :: AmbiguousParser Syntax.Dec
 funDec = do
-  pos <- position
+  pos@(Syntax.Pos _ _ c) <- position
   e1 <- upper
   e2 <- choice [ do leftBracket
                     e2 <- liftM2 (:) lower (many $ comma >> lower)
@@ -189,7 +194,7 @@ funDec = do
   colon
   e4 <- typ0
   e5 <- withLocals (patsLocals e3) $
-          indented 3 stm0
+          indented (c + 2) stm0
   return $ Syntax.FunDec pos e1 e2 e3 e4 e5
 
 withLocals :: [String] -> AmbiguousParser a -> AmbiguousParser a
@@ -435,11 +440,40 @@ constructor = do
 tagDec :: AmbiguousParser Syntax.Dec
 tagDec = do
   pos <- position
-  keyword "new"
+  keyword "tag"
   e1 <- upper
   colon
   e2 <- typ0
   return $ Syntax.TagDec pos e1 e2
+
+newDec :: AmbiguousParser Syntax.Dec
+newDec = do
+  pos <- position
+  keyword "new"
+  e1 <- upper
+  equals
+  e2 <- upper
+  e3 <- choice [ do leftBracket
+                    e3 <- liftM2 (:) typ0 (many $ comma >> typ0)
+                    rightBracket
+                    return e3
+               , return []
+               ]
+  return $ Syntax.NewDec pos e1 e2 e3
+
+unitDec :: AmbiguousParser Syntax.Dec
+unitDec = do
+  pos@(Syntax.Pos _ _ c) <- position
+  keyword "unit"
+  e1 <- upper
+  e2 <- choice [ do leftBracket
+                    e3 <- liftM2 (:) lower (many $ comma >> lower)
+                    rightBracket
+                    return e3
+               , return []
+               ]
+  e3 <- many $ indented (c + 2) dec
+  indented c dec
 
 undefinedFailure :: AmbiguousParser a
 undefinedFailure = failure

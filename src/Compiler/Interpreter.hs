@@ -1,7 +1,6 @@
 module Compiler.Interpreter where
 
-import           Control.Monad   (liftM, zipWithM)
-import           Data.Maybe      (fromJust)
+import           Control.Monad   (zipWithM)
 
 import           Compiler.Lambda
 
@@ -71,8 +70,7 @@ data Status = ExitStatus
 
 interpret :: Program -> Status
 interpret (Program ts ns fs d) = loop ts ns fs r
-                                 where r = do v <- eval (functionBody (lookupJust d fs))
-                                              (closureValue v) UnitValue
+                                 where r = do eval (functionBody (maybe (error "interpreter lookup main") id (lookup d fs)))
 
 loop :: [(TagIdent, Tag)] -> [(VariantIdent, Variant)] -> [(FunctionIdent, Function)] -> Result Value -> Status
 loop ts ns fs r = loop1 r
@@ -80,9 +78,9 @@ loop ts ns fs r = loop1 r
         loop1 (Bind (Return _) _) = error "Compiler.Interpreter.loop: unreachable"
         loop1 (Bind (Bind _ _) _) = error "Compiler.Interpreter.loop: unreachable"
         loop1 (Bind (Escape tag x) k) = EscapeStatus tag x
-        loop1 (Bind (LookupTag d) k) = loop1 $ k (lookupJust d ts)
-        loop1 (Bind (LookupVariant d) k) = loop1 $ k (lookupJust d ns)
-        loop1 (Bind (LookupFunction d) k) = loop1 $ k (lookupJust d fs)
+        loop1 (Bind (LookupTag d) k) = loop1 $ k (maybe (error "interpreter lookup tag") id (lookup d ts))
+        loop1 (Bind (LookupVariant d) k) = loop1 $ k (maybe (error "interpreter lookup variant") id (lookup d ns))
+        loop1 (Bind (LookupFunction d) k) = loop1 $ k (maybe (error "interpreter lookup function") id (lookup d fs))
         loop1 (Bind GetTypeEnv k) = loop1 $ k []
         loop1 (Bind GetValueEnv k) = loop1 $ k []
         loop1 m = loop1 $ Bind m Return
@@ -129,7 +127,8 @@ eval (ShowTerm t e)             = do { t' <- evalType t; v <- eval e; evalShowVa
 eval UnitTerm                   = Return UnitValue
 eval (Unreachable _)            = error "Interpreter: Unreachable"
 eval (UntupleTerm ds e1 e2)     = do { v <- eval e1; bind ds (tupleValue v) e2 }
-eval (VariableTerm d)           = liftM (lookupJust d) GetValueEnv
+eval (VariableTerm d)           = do r <- GetValueEnv
+                                     return $ maybe (error "interpreter variable term") id (lookup d r)
 
 bind :: [ValueIdent] -> [Value] -> Term -> Result Value
 bind ds vs e = do xs <- GetTypeEnv
@@ -206,7 +205,8 @@ evalType (TagType t1 t2) = do t1' <- evalType t1
 evalType (TupleType ts) = do ts' <- mapM evalType ts
                              return $ TupleType ts'
 evalType UnitType = return UnitType
-evalType (VariableType d) = liftM (lookupJust d) GetTypeEnv
+evalType (VariableType d) = do r <- GetTypeEnv
+                               return $ maybe (error "interpreter lookup variable type") id (lookup d r)
 evalType (VariantType n ts) = do ts' <- mapM evalType ts
                                  return $ VariantType n ts'
 
@@ -214,8 +214,3 @@ evalType (VariantType n ts) = do ts' <- mapM evalType ts
 
 evalClosed :: Term -> Result Value
 evalClosed e = withDynamicEnv [] [] (eval e)
-
--- Utility
-
-lookupJust :: Eq a => a -> [(a, b)] -> b
-lookupJust key = fromJust . lookup key

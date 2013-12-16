@@ -8,6 +8,7 @@ data Program = Program [Dec]
 type Ident = String
 
 data Dec = FunDec Pos String [String] [Pat] Typ Term
+         | NewDec Pos String String [Typ]
          | SumDec Pos String [String] [(Pos, String, [Typ])]
          | TagDec Pos String Typ
            deriving (Eq, Show)

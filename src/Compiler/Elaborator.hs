@@ -1,7 +1,7 @@
 module Compiler.Elaborator where
 
 import           Control.Monad   (liftM)
-import           Data.Maybe      (catMaybes, fromJust)
+import           Data.Maybe      (catMaybes)
 
 import qualified Compiler.Lambda as Lambda
 import qualified Compiler.Syntax as Syntax
@@ -40,21 +40,21 @@ run m = check genStart m
 withConstructors :: [(String, Int)] -> Result a -> Result a
 withConstructors gs m = check m
   where check (Return x)                          = Return x
-        check (Bind (LookupConstructorIndex s) k) = check $ k (lookupJust s gs)
+        check (Bind (LookupConstructorIndex s) k) = check $ k (maybe (error "withConstructors") id (lookup s gs))
         check (Bind m k)                          = Bind m (check . k)
         check m                                   = check (Bind m Return)
 
 withUppers :: [(String, Int)] -> Result a -> Result a
 withUppers gs m = check m
   where check (Return x)               = Return x
-        check (Bind (LookupUpper s) k) = check $ k (lookupJust s gs)
+        check (Bind (LookupUpper s) k) = check $ k (maybe (error ("withUppers: " ++ s ++ ", " ++ show (map fst gs))) id (lookup s gs))
         check (Bind m k)               = Bind m (check . k)
         check m                        = check (Bind m Return)
 
 withTypes :: [(String, Int)] -> Result a -> Result a
 withTypes gs m = check m
   where check (Return x)                      = Return x
-        check (Bind (LookupTypeVariable s) k) = check $ k (lookupJust s gs)
+        check (Bind (LookupTypeVariable s) k) = check $ k (maybe (error "withTypes") id (lookup s gs))
         check (Bind m k)                      = Bind m (check . k)
         check m                               = check (Bind m Return)
 
@@ -74,22 +74,6 @@ funs :: [(Lambda.FunctionIdent, Lambda.Function)]
 funs = [ -- Exit
          (0, Lambda.Function [] (Lambda.VariantType 0 [])
                (Lambda.ConstructorTerm 0 [] 0 []))
-         -- Handle
-       , (1, Lambda.Function [] undefined
-               (Lambda.LambdaTerm 2 undefined
-                 (Lambda.LambdaTerm 3 undefined
-                   (Lambda.UntupleTerm [4, 5] (Lambda.VariableTerm 2)
-                     (Lambda.CatchTerm (Lambda.VariableTerm 4)
-                                       (Lambda.ApplyTerm (Lambda.VariableTerm 5) Lambda.UnitTerm)
-                                       6
-                                       7
-                                       (Lambda.ApplyTerm (Lambda.ApplyTerm (Lambda.VariableTerm 3) (Lambda.VariableTerm 6))
-                                                         (Lambda.VariableTerm 7)))))))
-         -- Throw
-       , (6, Lambda.Function [] undefined
-               (Lambda.LambdaTerm 7 undefined
-                 (Lambda.LambdaTerm 8 undefined
-                   (Lambda.ThrowTerm (Lambda.VariableTerm 7) (Lambda.VariableTerm 8)))))
          -- Unreachable
        , (9, Lambda.Function [10] (Lambda.VariableType 10)
                (Lambda.Unreachable (Lambda.VariableType 10)))
@@ -104,8 +88,6 @@ constructorEnv = [ ("Exit", 0)
 
 env :: [(String, Int)]
 env = [ ("Exit", 0)
-      , ("Handle", 1)
-      , ("Throw", 6)
       , ("Unreachable", 9)
       ]
 
@@ -128,6 +110,12 @@ decEnvs (xs, ys) (Syntax.SumDec _ s _ rs : ds)    = do d <- Gen
                                                        decEnvs (zip ss [0..] ++ xs, zip ss ns ++ ys) ds
 decEnvs (xs, ys) (Syntax.TagDec _ s ty : ds)      = do d <- Gen
                                                        decEnvs (xs, (s, d) : ys) ds
+decEnvs (xs, ys) (Syntax.NewDec _ s1 "Escape" tys : ds) = do d1 <- Gen
+                                                             d2 <- Gen
+                                                             ys <- return $ (s1 ++ ".Throw", d1) : ys
+                                                             ys <- return $ (s1 ++ ".Catch", d2) : ys
+                                                             decEnvs (xs, ys) ds
+decEnvs (xs, ys) (Syntax.NewDec _  _ _       _   : _ ) = error "decEnvs new"
 
 elaborateFunction :: Syntax.Dec -> Result [(Lambda.FunctionIdent, Lambda.Function)]
 elaborateFunction (Syntax.FunDec _ s ss ps t e) = do
@@ -154,6 +142,29 @@ elaborateFunction (Syntax.TagDec _ s ty) = do
   d <- LookupUpper s
   ty' <- elaborateType (Syntax.typType ty)
   return $ [(d, Lambda.Function [] ty' (Lambda.TagTerm d))]
+elaborateFunction (Syntax.NewDec _ s1 "Escape" [ty1, ty2]) = do d1 <- LookupUpper $ s1 ++ ".Catch"
+                                                                d2 <- LookupUpper $ s1 ++ ".Throw"
+                                                                d3 <- Gen
+                                                                d4 <- Gen
+                                                                d5 <- Gen
+                                                                d6 <- Gen
+                                                                d7 <- Gen
+                                                                d8 <- Gen
+                                                                d9 <- Gen
+                                                                return [ (d1, Lambda.Function [d5] undefined
+                                                                                (Lambda.LambdaTerm d6 undefined
+                                                                                  (Lambda.LambdaTerm d7 undefined
+                                                                                    (Lambda.CatchTerm (Lambda.TagTerm d3)
+                                                                                      (Lambda.ApplyTerm (Lambda.VariableTerm d6) Lambda.UnitTerm)
+                                                                                      d8 d9
+                                                                                      (Lambda.ApplyTerm (Lambda.ApplyTerm (Lambda.VariableTerm d7)
+                                                                                                                          (Lambda.VariableTerm d8))
+                                                                                                        (Lambda.VariableTerm d9))))))
+                                                                       , (d2, Lambda.Function [] undefined
+                                                                                (Lambda.LambdaTerm d4 undefined
+                                                                                  (Lambda.ThrowTerm (Lambda.TagTerm d3) (Lambda.VariableTerm d4))))
+                                                                       ]
+elaborateFunction (Syntax.NewDec _ _  _       _         ) = error "elaborateFunction new"
 
 elaborateVariant :: Syntax.Dec -> Result (Maybe (Lambda.VariantIdent, Lambda.Variant))
 elaborateVariant (Syntax.FunDec _ _ _ _ _ _) = return Nothing
@@ -165,6 +176,7 @@ elaborateVariant (Syntax.SumDec _ s ss rs) = do
     xs <- mapM (\ (_, _, tys) -> mapM (elaborateType . Syntax.typType) tys) rs
     return (Just (d, Lambda.Variant ds ns xs))
 elaborateVariant (Syntax.TagDec _ _ _) = return Nothing
+elaborateVariant (Syntax.NewDec _ _ _ _) = return Nothing
 
 elaborateCurried :: [Syntax.Pat] -> Syntax.Term -> Result Lambda.Term
 elaborateCurried [] e     = elaborateTerm e
@@ -232,8 +244,3 @@ elaborateType (Type.Tuple ts)       = do { ts' <- mapM elaborateType ts; return 
 elaborateType Type.Unit             = return Lambda.UnitType
 elaborateType (Type.Variable s)     = liftM Lambda.VariableType (LookupTypeVariable s)
 elaborateType (Type.Variant _ _)    = return $ Lambda.VariantType 0 [] -- fix
-
--- Utility
-
-lookupJust :: Eq a => a -> [(a, b)] -> b
-lookupJust key = fromJust . lookup key

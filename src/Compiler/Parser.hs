@@ -18,8 +18,8 @@ parser filename = parse tokenizer tokenParser
         parse t (TokenParserFinished prog)  = ParserFinished prog
         parse t (TokenParserTokenRequest k) = tokenize k t
         parse t (TokenParserError pos msg)  = ParserError pos msg
-        tokenize :: (Maybe (String, Position, Token) -> TokenParser Syntax.Program) -> Tokenizer -> Parser
-        tokenize k t@TokenizerEndOfFile = parse t $ k Nothing
-        tokenize k (TokenizerToken pos tok t) = parse t $ k (Just (filename, pos, tok))
+        tokenize :: ((String, Position, Maybe Token) -> TokenParser Syntax.Program) -> Tokenizer -> Parser
+        tokenize k t@(TokenizerEndOfFile pos) = parse t $ k (filename, pos, Nothing)
+        tokenize k (TokenizerToken pos tok t) = parse t $ k (filename, pos, Just tok)
         tokenize k (TokenizerCharRequest k2)  = ParserCharRequest (tokenize k . k2)
         tokenize k (TokenizerError pos)       = ParserTokenizerError pos

@@ -51,6 +51,9 @@ inferDec (Syntax.FunDec pos s ss ps ty t) = do
 inferDec (Syntax.TagDec pos s ty) =
   Right $ Syntax.TagDec pos s ty
 
+inferDec (Syntax.NewDec pos s1 s2 tys) =
+  Right $ Syntax.NewDec pos s1 s2 tys
+
 
 -- Do I just want to add the metavariable?
 

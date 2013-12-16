@@ -3,32 +3,34 @@
 -- Unreachable : a
 -- Exit : Output
 
-new T : Tag⟦(), Bool⟧
+unit Box⟦t⟧
 
+  new E = Escape⟦(), t⟧
+
+  With⟦a⟧(x : t)(f : () ⟶ a) : a
+    E.Catch(f)(C(x))
+
+  C⟦a⟧(x : t)()(f : t ⟶ a) : a
+    f(x)
+
+  Get : t
+    E.Throw()
+
+new E = Escape⟦(), Bool⟧
 
 sum Bool
   False
   True
 
-Main() : Output
-  bind (x, y) : ((), ()) to (Unreachable, Unreachable)
+Main : Output
+  E.Catch(F)(G)
+
+F() : Output
+  bind _ to E.Throw()
   Exit
 
-Z⟦a⟧(x : a) : ()
-  Z(x, x)
-
-K() : Output
-  bind x to Get(T)
-  Exit
-
-With⟦a, b⟧(t : Tag⟦(), a⟧, x : a)(k : () ⟶ b) : b
-  Handle(t, k)(C(x))
-
-Get⟦a⟧(t : Tag⟦(), a⟧) : a
-  Throw(t)()
-
-C⟦a, b⟧(x : a)(_ : ())(f : a ⟶ b) : b
-  f(x)
+G()(f : Bool ⟶ Output) : Output
+  f(True)
 
 -- sum List⟦a⟧
 --   Nil

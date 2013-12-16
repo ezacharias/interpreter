@@ -6,7 +6,7 @@ module Compiler.Tokenizer
 import           Compiler.Token
 
 -- | A tokenizer is a data structure which is incrementally fed characters and incrementally returns tokens.
-data Tokenizer = TokenizerEndOfFile
+data Tokenizer = TokenizerEndOfFile Position
                | TokenizerToken Position Token Tokenizer
                -- | Passed Nothing if at EOF.
                | TokenizerCharRequest (Maybe Char -> Tokenizer)
@@ -14,7 +14,7 @@ data Tokenizer = TokenizerEndOfFile
 
 -- | The char will be the next one presented to a char request. This allows for peeking at a char.
 present :: Char -> Tokenizer -> Tokenizer
-present c t@TokenizerEndOfFile = t
+present c t@(TokenizerEndOfFile pos) = t
 present c (TokenizerToken pos tok t) = TokenizerToken pos tok (present c t)
 present c (TokenizerCharRequest k)   = k (Just c)
 present c t@(TokenizerError pos) = t
@@ -25,7 +25,7 @@ tokenizer = start posStart
 -- A tokenizer for the start of the file, which must check for '\'#!\''.
 start :: Position -> Tokenizer
 start pos = TokenizerCharRequest check
-  where check Nothing = TokenizerEndOfFile
+  where check Nothing = TokenizerEndOfFile pos
         check (Just c) = test c
         test '#'  = startHash (colSucc pos)
         test c    = present c (tok pos)
@@ -40,7 +40,7 @@ startHash pos = TokenizerCharRequest check
 -- The main token matcher.
 tok :: Position -> Tokenizer
 tok pos = TokenizerCharRequest check
-  where check Nothing  = TokenizerEndOfFile
+  where check Nothing  = TokenizerEndOfFile pos
         check (Just c) = test c
         test '-'  = dash (colSucc pos)
         test ' '  = tok (colSucc pos)
@@ -73,7 +73,7 @@ dash pos = TokenizerCharRequest check
 
 skipLine :: Position -> Tokenizer
 skipLine pos = TokenizerCharRequest check
-  where check Nothing = TokenizerEndOfFile
+  where check Nothing = TokenizerEndOfFile pos
         check (Just c) = test c
         test '\n' = tok (lineSucc pos)
         test _    = skipLine (colSucc pos)
@@ -83,7 +83,7 @@ type ReversedString = String
 
 digit :: Position -> Position -> ReversedString -> Tokenizer
 digit pos' pos cs = TokenizerCharRequest check
-  where check Nothing = TokenizerToken pos (IntToken (read $ reverse cs)) TokenizerEndOfFile
+  where check Nothing = TokenizerToken pos (IntToken (read $ reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
         test c | '0' <= c && c <= '9'
                   = digit (colSucc pos') pos (c:cs)
@@ -91,7 +91,7 @@ digit pos' pos cs = TokenizerCharRequest check
 
 lower :: Position -> Position -> ReversedString -> Tokenizer
 lower pos' pos cs = TokenizerCharRequest check
-  where check Nothing = TokenizerToken pos (LowerToken (reverse cs)) TokenizerEndOfFile
+  where check Nothing = TokenizerToken pos (LowerToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
         test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
                   = lower (colSucc pos') pos (c:cs)
@@ -99,8 +99,8 @@ lower pos' pos cs = TokenizerCharRequest check
 
 upper :: Position -> Position -> ReversedString -> Tokenizer
 upper pos' pos cs = TokenizerCharRequest check
-  where check Nothing = TokenizerToken pos (UpperToken (reverse cs)) TokenizerEndOfFile
+  where check Nothing = TokenizerToken pos (UpperToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
-        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c == '.'
                   = upper (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (UpperToken (reverse cs)) (present c $ tok pos')

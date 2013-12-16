@@ -49,9 +49,9 @@ tokenize filename = do
 hTokenize :: String -> Handle -> Driver [(Position, Token)]
 hTokenize filename handle = tokenize tokenizer
   where tokenize :: Tokenizer -> Driver [(Position, Token)]
-        tokenize TokenizerEndOfFile = return []
-        tokenize (TokenizerToken pos tok t) = liftM ((pos, tok) :) (tokenize t)
-        tokenize (TokenizerCharRequest k) = liftIO (maybeHGetChar handle) >>= (tokenize . k)
+        tokenize (TokenizerEndOfFile pos)     = return []
+        tokenize (TokenizerToken pos tok t)   = liftM ((pos, tok) :) (tokenize t)
+        tokenize (TokenizerCharRequest k)     = liftIO (maybeHGetChar handle) >>= (tokenize . k)
         tokenize (TokenizerError (line, col)) = DriverError $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Tokenizer error."
 
 parse :: String -> Driver Syntax.Program

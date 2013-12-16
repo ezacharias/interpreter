@@ -26,16 +26,6 @@ instance Monad Result where
 
 env :: [(String, ([String], Type.Type))]
 env = [ ("Exit", ([], Type.Variant "Output" []))
-      , ("Handle", (["a", "b", "c"], Type.Arrow (Type.Tuple [ Type.Variant "Tag" [Type.Variable "a", Type.Variable "b"]
-                                                            , Type.Arrow Type.Unit (Type.Variable "c")
-                                                            ])
-                                                (Type.Arrow (Type.Arrow (Type.Variable "a")
-                                                                        (Type.Arrow (Type.Arrow (Type.Variable "b") (Type.Variable "c"))
-                                                                                    (Type.Variable "c")))
-                                                            (Type.Variable "c"))))
-      , ("Throw", (["a", "b"], Type.Arrow (Type.Variant "Tag" [Type.Variable "a", Type.Variable "b"])
-                                          (Type.Arrow (Type.Variable "a")
-                                                      (Type.Variable "b"))))
       , ("Unreachable", (["a"], Type.Variable "a"))
       ]
 
@@ -56,12 +46,23 @@ arity r (FunDec _ s ss ps ty _) = (s, (ss, funType ps ty)) : r
 arity r (SumDec _ s1 ss rs) = foldl f r rs
                               where f r (_, s2, tys) = (s2, (ss, constructorType tys s1 ss)) : r
 arity r (TagDec _ s ty) = (s, ([], typType ty)) : r
+arity r (NewDec _ s1 "Escape" [ty1, ty2]) = (s1 ++ ".Catch", (["a"], Type.Arrow (Type.Arrow Type.Unit (Type.Variable "a"))
+                                                                    (Type.Arrow (Type.Arrow ty1'
+                                                                                (Type.Arrow (Type.Arrow ty2' (Type.Variable "a"))
+                                                                                            (Type.Variable "a")))
+                                                                                (Type.Variable "a"))))
+                                          : (s1 ++ ".Throw", ([], Type.Arrow ty1' ty2'))
+                                          : r
+                                          where ty1' = typType ty1
+                                                ty2' = typType ty2
+arity r (NewDec _ _ _ _) = error "NewDec"
 
 constructors :: [(String, ([String], [Type.Type], Type.Type))] -> Dec -> [(String, ([String], [Type.Type], Type.Type))]
 constructors r (FunDec _ _ _ _ _ _) = r
 constructors r (SumDec _ s1 ss rs) = foldl f r rs
                                      where f r (_, s2, tys) = (s2, (ss, map typType tys, Type.Variant s1 (map Type.Variable ss))) : r
 constructors r (TagDec _ _ _) = r
+constructors r (NewDec _ _ _ _) = r
 
 genMeta :: a -> Result Type.Type
 genMeta _ = liftM Type.Metavariable Gen
@@ -80,6 +81,7 @@ dec ds g r n (FunDec pos s ss ps t e) = check n m
         check n (Bind (Bind _ _) _)      = error "Compiler.Meta.dec: unreachable"
 dec ds g r n (SumDec pos s ss rs) = (SumDec pos s ss rs : ds, n)
 dec ds g r n (TagDec pos s ty)    = (TagDec pos s ty : ds, n)
+dec ds g r n (NewDec pos s1 s2 tys) = (NewDec pos s1 s2 tys : ds, n)
 
 term :: Term -> Result Term
 term (ApplyTerm _ t1 t2)  = do m <- genMeta ()
