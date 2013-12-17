@@ -64,15 +64,14 @@ parse filename = do
 hParse :: String -> Handle -> Driver Syntax.Program
 hParse filename handle = parse (parser filename)
   where parse :: Parser -> Driver Syntax.Program
-        parse (ParserFinished prog) = return prog
-        parse (ParserCharRequest k) = liftIO (maybeHGetChar handle) >>= (parse . k)
-        parse (ParserError (line, col) "")  = DriverError $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Parser error."
-        parse (ParserError (line, col) msg) = DriverError $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Parser error: " ++ msg
+        parse (ParserFinished prog)              = return prog
+        parse (ParserCharRequest k)              = liftIO (maybeHGetChar handle) >>= (parse . k)
+        parse (ParserError (line, col) _)        = DriverError $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Parser error."
         parse (ParserTokenizerError (line, col)) = DriverError $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Tokenizer error."
 
 maybeHGetChar :: Handle -> IO (Maybe Char)
 maybeHGetChar handle = check =<< hIsEOF handle
-  where check True = return Nothing
+  where check True  = return Nothing
         check False = liftM Just $ hGetChar handle
 
 syntaxCheck :: a -> Driver a

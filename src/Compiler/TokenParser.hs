@@ -1,12 +1,3 @@
---------------------------------------------------------------------------------
--- We need to get the filename. We can either pass it in with each token or we
--- can pass it in at the beginning or we can return a function from a filename
--- to syntax.
---
--- What position is EOF? I think we should have a position for EOF so we can
--- report the position when reporting errors.
---------------------------------------------------------------------------------
-
 module Compiler.TokenParser
   ( TokenParser (..)
   , tokenParser
