@@ -7,7 +7,7 @@ data Type = Arrow Type Type
           | Tuple [Type]
           | Unit
           | Variable String
-          | Variant String [Type]
+          | Variant [String] [Type]
  deriving (Eq, Show)
 
 rename :: [(String, Type)] -> Type -> Type

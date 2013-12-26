@@ -24,6 +24,8 @@ data Token = EqualsToken
            | RightBracketToken
            | LowerToken String
            | UpperToken String
+           | DotLowerToken String
+           | DotUpperToken String
            | IntToken Integer
            | CommaToken
            | RightArrowToken

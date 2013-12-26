@@ -12,9 +12,7 @@ type ValueIdent = Int
 data Program = Program [(TagIdent, Tag)] [(VariantIdent, Variant)] [(FunctionIdent, Function)] FunctionIdent
                deriving (Eq, Show)
 
--- We store the name of the tag so we can implement 'show' in the interpreter.
-
-data Tag = Tag String Type Type
+data Tag = Tag Type Type
            deriving (Eq, Show)
 
 -- We store the names of constructors so we can implement 'show' in the interpreter.

@@ -25,12 +25,12 @@ instance Monad Result where
   m        >>= f = Bind m f
 
 env :: [(String, ([String], Type.Type))]
-env = [ ("Exit", ([], Type.Variant "Output" []))
+env = [ ("Exit", ([], Type.Variant ["Output"] []))
       , ("Unreachable", (["a"], Type.Variable "a"))
       ]
 
 constructorEnv :: [(String, ([String], [Type.Type], Type.Type))]
-constructorEnv = [ ("Exit", ([], [], Type.Variant "Output" []))
+constructorEnv = [ ("Exit", ([], [], Type.Variant ["Output"] []))
                  ]
 
 addMetavariables :: Program -> Program
@@ -41,10 +41,12 @@ addMetavariables (Program ds) = Program (reverse ds')
         f :: ([Dec], Int) -> Dec -> ([Dec], Int)
         f (ds', n) d = dec ds' g r n d
 
+type Arity = [(String, ([String], Type.Type))]
+
 arity :: [(String, ([String], Type.Type))] -> Dec -> [(String, ([String], Type.Type))]
 arity r (FunDec _ s ss ps ty _) = (s, (ss, funType ps ty)) : r
 arity r (SumDec _ s1 ss rs) = foldl f r rs
-                              where f r (_, s2, tys) = (s2, (ss, constructorType tys s1 ss)) : r
+                              where f r (_, s2, tys) = (s2, (ss, constructorType tys [s1] ss)) : r
 arity r (TagDec _ s ty) = (s, ([], typType ty)) : r
 arity r (NewDec _ s1 "Escape" [ty1, ty2]) = (s1 ++ ".Catch", (["a"], Type.Arrow (Type.Arrow Type.Unit (Type.Variable "a"))
                                                                     (Type.Arrow (Type.Arrow ty1'
@@ -55,14 +57,24 @@ arity r (NewDec _ s1 "Escape" [ty1, ty2]) = (s1 ++ ".Catch", (["a"], Type.Arrow 
                                           : r
                                           where ty1' = typType ty1
                                                 ty2' = typType ty2
-arity r (NewDec _ _ _ _) = error "NewDec"
+arity r (NewDec _ s1 s2 tys) = lookupUnitArity s2 s1 tys ++ r
+arity r (UnitDec _ _ _ _) = r
+
+lookupUnitArity :: String -> String -> [Typ] -> Arity
+lookupUnitArity name prefix tyArgs = undefined
+
+type Constructors = [(String, ([String], [Type.Type], Type.Type))]
 
 constructors :: [(String, ([String], [Type.Type], Type.Type))] -> Dec -> [(String, ([String], [Type.Type], Type.Type))]
 constructors r (FunDec _ _ _ _ _ _) = r
 constructors r (SumDec _ s1 ss rs) = foldl f r rs
                                      where f r (_, s2, tys) = (s2, (ss, map typType tys, Type.Variant s1 (map Type.Variable ss))) : r
 constructors r (TagDec _ _ _) = r
-constructors r (NewDec _ _ _ _) = r
+constructors r (NewDec _ s1 s2 tys) = lookupUnitConstructors s2 s1 tys
+constructors r (UnitDec _ _ _ _) = r
+
+lookupUnitConstructors :: String -> String -> [Typ] -> Constructors
+lookupUnitConstructors name prefix tyArgs = undefined
 
 genMeta :: a -> Result Type.Type
 genMeta _ = liftM Type.Metavariable Gen
@@ -82,6 +94,12 @@ dec ds g r n (FunDec pos s ss ps t e) = check n m
 dec ds g r n (SumDec pos s ss rs) = (SumDec pos s ss rs : ds, n)
 dec ds g r n (TagDec pos s ty)    = (TagDec pos s ty : ds, n)
 dec ds g r n (NewDec pos s1 s2 tys) = (NewDec pos s1 s2 tys : ds, n)
+dec ds g r n (UnitDec pos s tys ds2) = withTypeVariables tys (f [] g r n ds2)
+                                       where f ds2' g r n [] = (UnitDec pos s tys (reverse ds2') : ds, n)
+                                             f ds2' g r n (d:ds) = undefined
+
+withTypeVariables :: [String] -> ([Dec], Int) -> ([Dec], Int)
+withTypeVariables = undefined
 
 term :: Term -> Result Term
 term (ApplyTerm _ t1 t2)  = do m <- genMeta ()

@@ -5,12 +5,15 @@ import qualified Compiler.Type as Type
 data Program = Program [Dec]
                deriving (Eq, Show)
 
-type Ident = String
+type Name = String
+type Qual = [Name]
 
 data Dec = FunDec Pos String [String] [Pat] Typ Term
-         | NewDec Pos String String [Typ]
+         | ModDec Pos String [Dec]
+         | NewDec Pos String Qual [Typ]
          | SumDec Pos String [String] [(Pos, String, [Typ])]
          | TagDec Pos String Typ
+         | UnitDec Pos String [String] [Dec]
            deriving (Eq, Show)
 
 data Term = ApplyTerm Type.Type Term Term
@@ -20,7 +23,7 @@ data Term = ApplyTerm Type.Type Term Term
           | SeqTerm Term Term
           | TupleTerm Pos [Type.Type] [Term]
           | UnitTerm Pos
-          | UpperTerm Pos [Type.Type] Type.Type String
+          | UpperTerm Pos [Type.Type] Type.Type Qual
           | VariableTerm Pos String
             deriving (Eq, Show)
 
@@ -31,14 +34,14 @@ data Pat = AscribePat Pat Typ
          | TuplePat [Type.Type] [Pat]
          | UnderbarPat
          | UnitPat Pos
-         | UpperPat Pos [Type.Type] Type.Type String [Pat]
+         | UpperPat Pos [Type.Type] Type.Type Qual [Pat]
            deriving (Eq, Show)
 
 data Typ = ArrowTyp Typ Typ
          | LowerTyp String
          | TupleTyp [Typ]
          | UnitTyp Pos
-         | UpperTyp Pos String [Typ]
+         | UpperTyp Pos Qual [Typ]
            deriving (Eq, Show)
 
 -- | Position filename line col.
@@ -50,7 +53,7 @@ funType :: [Pat] -> Typ -> Type.Type
 funType []     t = typType t
 funType (p:ps) t = Type.Arrow (patType p) (funType ps t)
 
-constructorType :: [Typ] -> String -> [String] -> Type.Type
+constructorType :: [Typ] -> [String] -> [String] -> Type.Type
 constructorType []       s1 ss = Type.Variant s1 (map Type.Variable ss)
 constructorType (ty:tys) s1 ss = Type.Arrow (typType ty) (constructorType tys s1 ss)
 

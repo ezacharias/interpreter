@@ -38,7 +38,7 @@ data Result a where
   Bind           :: Result b -> (b -> Result a) -> Result a
   Escape         :: TagIdent -> Value -> Result Value
   LookupFunction :: FunctionIdent -> Result Function
-  LookupTag      :: TagIdent -> Result Tag
+  LookupTag      :: TagIdent -> Result String
   LookupVariant  :: VariantIdent -> (Result Variant)
   GetTypeEnv     :: Result [(TypeIdent, Type)]
   GetValueEnv    :: Result [(ValueIdent, Value)]
@@ -69,16 +69,16 @@ data Status = ExitStatus
 -- The interpreter returns a list of strings and an exit status.
 
 interpret :: Program -> Status
-interpret (Program ts ns fs d) = loop ts ns fs r
-                                 where r = do eval (functionBody (maybe (error "interpreter lookup main") id (lookup d fs)))
+interpret (Program _ ns fs d) = loop ns fs r
+  where r = do eval (functionBody (maybe (error "interpreter lookup main") id (lookup d fs)))
 
-loop :: [(TagIdent, Tag)] -> [(VariantIdent, Variant)] -> [(FunctionIdent, Function)] -> Result Value -> Status
-loop ts ns fs r = loop1 r
+loop :: [(VariantIdent, Variant)] -> [(FunctionIdent, Function)] -> Result Value -> Status
+loop ns fs r = loop1 r
   where loop1 (Return x) = loop2 x
         loop1 (Bind (Return _) _) = error "Compiler.Interpreter.loop: unreachable"
         loop1 (Bind (Bind _ _) _) = error "Compiler.Interpreter.loop: unreachable"
         loop1 (Bind (Escape tag x) k) = EscapeStatus tag x
-        loop1 (Bind (LookupTag d) k) = loop1 $ k (maybe (error "interpreter lookup tag") id (lookup d ts))
+        loop1 (Bind (LookupTag d) k) = loop1 $ k "tag"
         loop1 (Bind (LookupVariant d) k) = loop1 $ k (maybe (error "interpreter lookup variant") id (lookup d ns))
         loop1 (Bind (LookupFunction d) k) = loop1 $ k (maybe (error "interpreter lookup function") id (lookup d fs))
         loop1 (Bind GetTypeEnv k) = loop1 $ k []
@@ -180,8 +180,7 @@ evalShowValue t v = do s <- showValue t v
                                                         s2 <- zipWithM parens ts vs
                                                         Return (s1 ++ concat s2)
         showVariantValue _ _ _ = error "impossible"
-        showTagValue _ d = do Tag s _ _ <- LookupTag d
-                              return s
+        showTagValue _ d = do LookupTag d
         showTupleValue (TupleType (t:ts)) (v:vs) = do s1 <- showValue t v
                                                       s2 <- commas ts vs
                                                       return $ "(" ++ s1 ++ s2

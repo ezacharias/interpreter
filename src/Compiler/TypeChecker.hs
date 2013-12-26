@@ -13,6 +13,9 @@ about how to do that.
 -}
 
 
+-- Use functors for Either.
+
+
 module Compiler.TypeChecker where
 
 import           Control.Monad   (MonadPlus, mzero)
@@ -51,8 +54,30 @@ inferDec (Syntax.FunDec pos s ss ps ty t) = do
 inferDec (Syntax.TagDec pos s ty) =
   Right $ Syntax.TagDec pos s ty
 
+inferDec (Syntax.ModDec pos s ds) =
+  case inferDecs ds of
+    Left msg -> Left msg
+    Right ds -> Right $ Syntax.ModDec pos s ds
+
 inferDec (Syntax.NewDec pos s1 s2 tys) =
   Right $ Syntax.NewDec pos s1 s2 tys
+
+inferDec (Syntax.UnitDec pos s tys ds) =
+  case inferDecs ds of
+    Left msg -> Left msg
+    Right ds -> Right $ Syntax.UnitDec pos s tys ds
+
+
+inferDecs :: [Syntax.Dec] -> Either String [Syntax.Dec]
+inferDecs [] = Right []
+inferDecs (d:ds) =
+  case inferDec d of
+    Left msg -> Left msg
+    Right d ->
+      case inferDecs ds of
+        Left msg -> Left msg
+        Right ds -> Right (d:ds)
+
 
 
 -- Do I just want to add the metavariable?
@@ -329,11 +354,11 @@ showType r Type.Unit = ("()", r)
 
 showType r (Type.Variable x) = (x, r)
 
-showType r (Type.Variant s []) = (s, r)
+showType r (Type.Variant s []) = (showQual s, r)
 
 showType r (Type.Variant s ts) =
   let (ss, r') = showTypes r ts
-   in (s ++ "⟦" ++ concat (intersperse ", " ss) ++ "⟧", r')
+   in (showQual s ++ "⟦" ++ concat (intersperse ", " ss) ++ "⟧", r')
 
 
 showTypes :: [Type.Metavariable] -> [Type.Type] -> ([String], [Type.Metavariable])
@@ -342,6 +367,9 @@ showTypes r []     = ([], r)
 showTypes r (t:ts) = let (s, r') = showType r t
                          (ss, r'') = showTypes r' ts
                       in (s:ss, r'')
+
+showQual :: [String] -> String
+showQual = concat . intersperse "."
 
 
 -- Attempts to unify two types, returning the new type. To equal concrete types

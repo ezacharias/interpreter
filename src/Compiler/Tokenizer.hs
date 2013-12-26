@@ -43,6 +43,7 @@ tok pos = TokenizerCharRequest check
   where check Nothing  = TokenizerEndOfFile pos
         check (Just c) = test c
         test '-'  = dash (colSucc pos)
+        test '.'  = dot (colSucc pos)
         test ' '  = tok (colSucc pos)
         test '\n' = tok (lineSucc pos)
         test '='  = TokenizerToken pos EqualsToken (tok (colSucc pos))
@@ -69,6 +70,14 @@ dash pos = TokenizerCharRequest check
   where check Nothing = TokenizerError pos
         check (Just c) = test c
         test '-' = skipLine (colSucc pos)
+        test _ = TokenizerError pos
+
+dot :: Position -> Tokenizer
+dot pos = TokenizerCharRequest check
+  where check Nothing = TokenizerError pos
+        check (Just c) = test c
+        test c | 'a' <= c && c <= 'z' = dotLower (colSucc pos) pos [c]
+        test c | 'A' <= c && c <= 'Z' = dotUpper (colSucc pos) pos [c]
         test _ = TokenizerError pos
 
 skipLine :: Position -> Tokenizer
@@ -104,3 +113,19 @@ upper pos' pos cs = TokenizerCharRequest check
         test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c == '.'
                   = upper (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (UpperToken (reverse cs)) (present c $ tok pos')
+
+dotLower :: Position -> Position -> ReversedString -> Tokenizer
+dotLower pos' pos cs = TokenizerCharRequest check
+  where check Nothing = TokenizerToken pos (DotLowerToken (reverse cs)) (TokenizerEndOfFile pos)
+        check (Just c) = test c
+        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+                  = dotLower (colSucc pos') pos (c:cs)
+        test c    = TokenizerToken pos (DotLowerToken (reverse cs)) (present c $ tok pos')
+
+dotUpper :: Position -> Position -> ReversedString -> Tokenizer
+dotUpper pos' pos cs = TokenizerCharRequest check
+  where check Nothing = TokenizerToken pos (DotUpperToken (reverse cs)) (TokenizerEndOfFile pos)
+        check (Just c) = test c
+        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c == '.'
+                  = dotUpper (colSucc pos') pos (c:cs)
+        test c    = TokenizerToken pos (DotUpperToken (reverse cs)) (present c $ tok pos')

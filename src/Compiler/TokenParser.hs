@@ -123,7 +123,7 @@ program = do
 dec :: AmbiguousParser Syntax.Dec
 dec = funDec <|> sumDec <|> tagDec <|> newDec <|> unitDec
 
-upper :: AmbiguousParser Syntax.Ident
+upper :: AmbiguousParser String
 upper = do
   pos <- position
   t <- token
@@ -131,10 +131,23 @@ upper = do
     UpperToken x -> return x
     _ -> failurePos pos
 
+dotUpper :: AmbiguousParser String
+dotUpper = do
+  pos <- position
+  t <- token
+  case t of
+    DotUpperToken x -> return x
+    _ -> failurePos pos
+
+qual :: AmbiguousParser Syntax.Qual
+qual = do x <- upper
+          xs <- many dotUpper
+          return $ x:xs
+
 leftBracket :: AmbiguousParser ()
 leftBracket = isToken LeftBracketToken
 
-lower :: AmbiguousParser Syntax.Ident
+lower :: AmbiguousParser String
 lower = do
   pos <- position
   t <- token
@@ -276,7 +289,7 @@ exp3 = choice [ do pos <- position
                    x <- lower
                    return $ Syntax.VariableTerm pos x
               , do pos <- position
-                   x <- upper
+                   x <- qual
                    return $ Syntax.UpperTerm pos [] Type.Unit x
               , exp4
               ]
@@ -317,7 +330,7 @@ pat1 =
 upperPat :: AmbiguousParser Syntax.Pat
 upperPat = do
   pos <- position
-  s <- upper
+  s <- qual
   ps <- many pat3
   return $ Syntax.UpperPat pos [] Type.Unit s ps
 
@@ -395,7 +408,7 @@ unitTyp = do
 upperTyp :: AmbiguousParser Syntax.Typ
 upperTyp = do
   pos <- position
-  e1 <- upper
+  e1 <- qual
   e2 <- choice [ do leftBracket
                     e2 <- liftM2 (:) typ0 (many $ comma >> typ0)
                     rightBracket
@@ -437,13 +450,21 @@ tagDec = do
   e2 <- typ0
   return $ Syntax.TagDec pos e1 e2
 
+modDec :: AmbiguousParser Syntax.Dec
+modDec = do
+  pos@(Syntax.Pos _ _ c) <- position
+  keyword "mod"
+  e1 <- upper
+  e2 <- many $ indented (c + 2) dec
+  return $ Syntax.ModDec pos e1 e2
+
 newDec :: AmbiguousParser Syntax.Dec
 newDec = do
   pos <- position
   keyword "new"
   e1 <- upper
   equals
-  e2 <- upper
+  e2 <- qual
   e3 <- choice [ do leftBracket
                     e3 <- liftM2 (:) typ0 (many $ comma >> typ0)
                     rightBracket
@@ -464,7 +485,7 @@ unitDec = do
                , return []
                ]
   e3 <- many $ indented (c + 2) dec
-  indented c dec
+  return $ Syntax.UnitDec pos e1 e2 e3
 
 undefinedFailure :: AmbiguousParser a
 undefinedFailure = failure
