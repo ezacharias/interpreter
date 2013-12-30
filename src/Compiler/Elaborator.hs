@@ -2,12 +2,14 @@ module Compiler.Elaborator where
 
 import qualified Compiler.Lambda as Lambda
 import qualified Compiler.Syntax as Syntax
+import qualified Compiler.Type   as Type
 
 elaborate :: Syntax.Program -> Lambda.Program
 elaborate p = runM m emptyK [] emptyEnv 0
   where m = do n <- gather p
                r <- update n
                withRename r $ do
+                 populateEnv
                  convert p
 
 
@@ -28,6 +30,22 @@ data Name = Name
 emptyName :: Name
 emptyName = Name [] [] [] [] []
 
+builtinName :: Name
+builtinName = Name [ ( "Escape"
+                     , Name []
+                            []
+                            []
+                            []
+                            [ "Throw"
+                            , "Catch"
+                            ]
+                     )
+                   ]
+                   []
+                   []
+                   [("Exit", 0)]
+                   ["Exit"]
+
 nameWithUnit :: Name -> String -> Name -> Name
 nameWithUnit (Name x1s x2s x3s x4s x5s) s n = Name ((s, n) : x1s) x2s x3s x4s x5s
 
@@ -44,29 +62,31 @@ nameWithConstructor (Name x1s x2s x3s x4s x5s) s i = Name x1s x2s x3s ((s,i):x4s
 nameWithFunction :: Name -> String -> Name
 nameWithFunction (Name x1s x2s x3s x4s x5s) s = Name x1s x2s x3s x4s (s:x5s)
 
-namesLookupUnit :: [Name] -> String -> Name
-namesLookupUnit [] _ = error "namesLookupUnit"
-namesLookupUnit (n:ns) s = maybe (namesLookupUnit ns s) id (nameLookupUnit n s)
+namesLookupUnit :: [Name] -> [String] -> Name
+namesLookupUnit [] q = error $ "namesLookupUnit: " ++ show q
+namesLookupUnit (n:ns) q = maybe (namesLookupUnit ns q) id (nameLookupUnit n q)
 
-nameLookupUnit :: Name -> String -> Maybe Name
-nameLookupUnit (Name x1s x2s x3s x4s x5s) s = lookup s x1s
+nameLookupUnit :: Name -> [String] -> Maybe Name
+nameLookupUnit n [] = error "nameLookupUnit"
+nameLookupUnit n [s] = lookup s (nameUnits n)
+nameLookupUnit n (s:q) = do n <- lookup s (nameModules n)
+                            nameLookupUnit n q
 
 gather :: Syntax.Program -> M Name
 gather p = return $ gatherProgram p
 
 gatherProgram :: Syntax.Program -> Name
-gatherProgram (Syntax.Program ds) = foldl (gatherDec []) emptyName ds
+gatherProgram (Syntax.Program ds) = foldl (gatherDec []) builtinName ds
 
 gatherDec :: [Name] -> Name -> Syntax.Dec -> Name
 gatherDec ns n (Syntax.FunDec _ s _ _ _ _) = nameWithFunction n s
 gatherDec ns n (Syntax.ModDec _ s ds)      = nameWithModule n s (foldl (gatherDec (n:ns)) emptyName ds)
-gatherDec ns n (Syntax.NewDec _ s q _)     = nameWithModule n s (namesLookupUnit (n:ns) s)
+gatherDec ns n (Syntax.NewDec _ s q _)     = nameWithModule n s (namesLookupUnit (n:ns) q)
 gatherDec ns n (Syntax.SumDec _ s _ cs)    = foldl gatherConstructor (nameWithVariant n s) (zip cs [0..])
-gatherDec ns n (Syntax.TagDec _ s _)       = nameWithFunction n s
 gatherDec ns n (Syntax.UnitDec _ s _ ds)   = nameWithUnit n s (foldl (gatherDec (n:ns)) emptyName ds)
 
 gatherConstructor :: Name -> ((Syntax.Pos, String, [Syntax.Typ]) , Int) -> Name
-gatherConstructor n ((_, s, _), i) = nameWithConstructor n s i
+gatherConstructor n ((_, s, _), i) = nameWithFunction (nameWithConstructor n s i) s
 
 
 --------------------------------------------------------------------------------
@@ -121,9 +141,6 @@ data Env = Env
              }
            deriving (Show)
 
-data UnitClosure = UnitClosure [Rename] [String] [Syntax.Dec]
-                   deriving (Show)
-
 -- Ignore the unit closures when checking equality. Equality is only used for
 -- testing.
 
@@ -132,8 +149,59 @@ instance Eq Env where
                                             && x3s == y3s
                                             && x4s == y4s
 
+data UnitClosure = UnitClosure ([Lambda.Type] -> Rename -> M ())
+
+instance Show UnitClosure where
+  show _ = "UnitClosure"
+
+unitClosure :: [Rename] -> [String] -> [Syntax.Dec] -> UnitClosure
+unitClosure rs ss ds = UnitClosure f
+  where f tys r = do
+          withRenameStack rs $ do
+            withTypeRenames ss tys $ do
+              withRename r $ do
+                mapM_ convertDec ds
+
+unitClosureApply :: UnitClosure -> [Lambda.Type] -> Rename -> M ()
+unitClosureApply (UnitClosure f) tys r = f tys r
+
 emptyEnv :: Env
 emptyEnv = Env [] [] [] []
+
+populateEnv :: M ()
+populateEnv = do
+  d <- lookupUnit ["Escape"]
+  exportUnitClosure d (UnitClosure f)
+  d <- lookupFunction ["Exit"]
+  exportFunction d (Lambda.Function [] undefined (Lambda.ConstructorTerm undefined [] 0 []))
+  where f [ty1, ty2] r = do
+          withRenameStack [r] $ do
+            d1 <- gen
+            exportTag d1 (Lambda.Tag ty1 ty2)
+            d2 <- lookupFunction ["Throw"]
+            d3 <- gen
+            exportFunction d2 $
+              Lambda.Function [] (Lambda.ArrowType ty1 ty2) $
+                Lambda.LambdaTerm d3 undefined $
+                  Lambda.ThrowTerm (Lambda.TagTerm d1) (Lambda.VariableTerm d3)
+            d4 <- lookupFunction ["Catch"]
+            d5 <- gen
+            d6 <- gen
+            d7 <- gen
+            d8 <- gen
+            d9 <- gen
+            exportFunction d4 $
+              Lambda.Function [d5] undefined $
+                Lambda.LambdaTerm d6 undefined $
+                  Lambda.LambdaTerm d7 undefined $
+                    Lambda.CatchTerm (Lambda.TagTerm d1)
+                      (Lambda.ApplyTerm (Lambda.VariableTerm d6) Lambda.UnitTerm)
+                      d8
+                      d9
+                      (Lambda.ApplyTerm (Lambda.ApplyTerm (Lambda.VariableTerm d7)
+                                                          (Lambda.VariableTerm d8))
+                                        (Lambda.VariableTerm d9))
+        f _ _ = error "populateEnv"
 
 envAddUnitClosure :: Env -> Int -> UnitClosure -> Env
 envAddUnitClosure (Env x1s x2s x3s x4s) d x = Env ((d,x):x1s) x2s x3s x4s
@@ -149,12 +217,12 @@ envAddFunction (Env x1s x2s x3s x4s) d x = Env x1s x2s x3s ((d,x):x4s)
 
 convert :: Syntax.Program -> M Lambda.Program
 convert (Syntax.Program ds) = do mapM_ convertDec ds
-                                 d <- lookupFunction "Main"
+                                 d <- lookupFunction ["Main"]
                                  Env _ x2s x3s x4s <- getEnv
                                  return $ Lambda.Program x2s x3s x4s d
 
 convertDec :: Syntax.Dec -> M ()
-convertDec (Syntax.FunDec _ s ss ps ty t) = do d <- lookupFunction s
+convertDec (Syntax.FunDec _ s ss ps ty t) = do d <- lookupFunction [s]
                                                ds <- mapM (\ _ -> gen) ss
                                                withTypeRenames ss (map Lambda.VariableType ds) $ do
                                                  ty <- convertType ty
@@ -167,23 +235,37 @@ convertDec (Syntax.ModDec _ s ds)       = do r <- lookupMod [s]
 convertDec (Syntax.NewDec _ s1 q tys)   = do tys' <- mapM convertType tys
                                              r <- lookupMod [s1]
                                              d <- lookupUnit q
-                                             UnitClosure rs ss ds <- lookupUnitClosure d
-                                             withRenameStack rs $ do
-                                               withTypeRenames ss tys' $ do
-                                                 withRename r $ do
-                                                   mapM_ convertDec ds
+                                             x <- lookupUnitClosure d
+                                             unitClosureApply x tys' r
 convertDec (Syntax.SumDec _ s ss cs)    = convertSumDec s ss cs
-convertDec (Syntax.TagDec _ s ty)       = do d1 <- gen
-                                             exportTag d1 (Lambda.Tag Lambda.UnitType Lambda.UnitType)
-                                             d2 <- lookupFunction s
-                                             ty' <- convertType ty
-                                             exportFunction d2 (Lambda.Function [] ty' $ Lambda.TagTerm d1)
 convertDec (Syntax.UnitDec _ s1 s2s ds) = do d <- lookupUnit [s1]
                                              rs <- getRenameStack
-                                             exportUnitClosure d $ UnitClosure rs s2s ds
+                                             exportUnitClosure d $ unitClosure rs s2s ds
 
 convertCurried :: [Syntax.Pat] -> Syntax.Term -> M Lambda.Term
-convertCurried = undefined
+convertCurried []     t = convertTerm t
+convertCurried (p:ps) t = do
+  d  <- gen
+  t  <- convertPat d p (convertCurried ps t)
+  ty <- patternType p
+  return $ Lambda.LambdaTerm d ty t
+
+convertPat :: Int -> Syntax.Pat -> M a -> M a
+convertPat d p m =
+  case p of
+    Syntax.UnitPat _ ->
+      m
+    p -> error $ "cp: " ++ show p
+
+convertTerm :: Syntax.Term -> M Lambda.Term
+convertTerm t =
+  case t of
+    Syntax.UpperTerm _ tys _ q -> do
+      d   <- lookupFunction q
+      tys <- mapM convertTypeType tys
+      return $ Lambda.TypeApplyTerm d tys
+    _ -> error $ "ct: " ++ show t
+
 
 -- This must export both the variant type and the constructor functions.
 
@@ -197,11 +279,10 @@ convertSumDec s ss cs = do
     exportVariant d (Lambda.Variant dd names tys)
   let f n [] = return ()
       f n ((_, s2, tys):cs) = do
-        d2 <- lookupFunction s2
+        d2 <- lookupFunction [s2]
         dd2 <- mapM (\ _ -> gen) ss
         withTypeRenames ss (map Lambda.VariableType dd2) $ do
           ty <- convertCurriedTypes tys (Lambda.VariantType d (map Lambda.VariableType dd2))
-          ty2 <- undefined
           t <- let g [] d2s = return $ Lambda.ConstructorTerm d (map Lambda.VariableType dd2) n (reverse d2s)
                    g (ty1:ty1s) d2s = do
                      ty1 <- convertType ty1
@@ -234,7 +315,7 @@ patternType (Syntax.TuplePat _ ps)   = do tys <- mapM patternType ps
                                           return $ Lambda.TupleType tys
 patternType Syntax.UnderbarPat       = error "impossible"
 patternType (Syntax.UnitPat _)       = return $ Lambda.UnitType
-patternType (Syntax.UpperPat _ _ _ _ _) = undefined
+patternType (Syntax.UpperPat _ _ _ _ _) = error "patternType"
 
 convertType :: Syntax.Typ -> M Lambda.Type
 convertType (Syntax.ArrowTyp ty1 ty2) = do ty1 <- convertType ty1
@@ -248,9 +329,33 @@ convertType (Syntax.UpperTyp _ q tys) = do d <- lookupVariant q
                                            tys <- mapM convertType tys
                                            return $ Lambda.VariantType d tys
 
-lookupFunction :: String -> M Int
-lookupFunction s = do rs <- getRenameStack
-                      return $ renameStackLookupFunction rs s
+convertTypeType :: Type.Type -> M Lambda.Type
+convertTypeType (Type.Arrow ty1 ty2)  = do ty1 <- convertTypeType ty1
+                                           ty2 <- convertTypeType ty2
+                                           return $ Lambda.ArrowType ty1 ty2
+convertTypeType (Type.Metavariable _) =    error "convertTypeType"
+convertTypeType (Type.Tuple tys)      = do tys <- mapM convertTypeType tys
+                                           return $ Lambda.TupleType tys
+convertTypeType Type.Unit             =    return Lambda.UnitType
+convertTypeType (Type.Variable s)     =    lookupType s
+convertTypeType (Type.Variant q tys)  = do d <- lookupVariant q
+                                           tys <- mapM convertTypeType tys
+                                           return $ Lambda.VariantType d tys
+
+lookupFunction :: [String] -> M Int
+lookupFunction q = do rs <- getRenameStack
+                      return $ renameStackLookupFunction rs q
+
+renameStackLookupFunction :: [Rename] -> [String] -> Int
+renameStackLookupFunction []     q = error $ "impossible: " ++ show q
+renameStackLookupFunction (r:rs) q = maybe failure id (renameLookupFunction r q)
+  where failure = renameStackLookupFunction rs q
+
+renameLookupFunction :: Rename -> [String] -> Maybe Int
+renameLookupFunction r []    = error $ "impossible"
+renameLookupFunction r [s]   = lookup s (renameFunctions r)
+renameLookupFunction r (s:q) = do r <- lookup s (renameMods r)
+                                  renameLookupFunction r q
 
 lookupType :: String -> M Lambda.Type
 lookupType s = do rs <- getRenameStack
@@ -260,11 +365,6 @@ renameStackLookupType :: [Rename] -> String -> Lambda.Type
 renameStackLookupType [] s = error $ "impossible"
 renameStackLookupType (r:rs) s = maybe failure id (lookup s (renameTypes r))
   where failure = renameStackLookupType rs s
-
-renameStackLookupFunction :: [Rename] -> String -> Int
-renameStackLookupFunction []     s = error $ "impossible: " ++ show s
-renameStackLookupFunction (r:rs) s = maybe failure id (lookup s (renameFunctions r))
-  where failure = renameStackLookupFunction rs s
 
 lookupUnit :: [String] -> M Int
 lookupUnit q = do rs <- getRenameStack

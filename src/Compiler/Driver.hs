@@ -38,6 +38,9 @@ liftIO io = DriverPerformIO (liftM return io)
 interpreter :: String -> Driver ()
 interpreter = parse >=> syntaxCheck >=> typeCheck >=> elaborate >=> interpret
 
+floop :: Show a => a -> Driver b
+floop x = liftIO (writeFile "/dev/null" (show x)) >> liftIO exitFailure
+
 -- | Used for testing purposes only.
 tokenize :: String -> Driver [(Position, Token)]
 tokenize filename = do

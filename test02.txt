@@ -23,14 +23,7 @@ sum Bool
   True
 
 Main : Output
-  E.Catch(F)(G)
-
-F() : Output
-  bind _ to E.Throw()
   Exit
-
-G()(f : Bool ⟶ Output) : Output
-  f(True)
 
 -- sum List⟦a⟧
 --   Nil

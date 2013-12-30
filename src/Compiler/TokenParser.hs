@@ -121,7 +121,7 @@ program = do
   return $ Syntax.Program xs
 
 dec :: AmbiguousParser Syntax.Dec
-dec = funDec <|> sumDec <|> tagDec <|> newDec <|> unitDec
+dec = funDec <|> sumDec <|> newDec <|> unitDec
 
 upper :: AmbiguousParser String
 upper = do
@@ -440,15 +440,6 @@ constructor = do
   e1 <- upper
   e2 <- many typ2
   return (pos, e1, e2)
-
-tagDec :: AmbiguousParser Syntax.Dec
-tagDec = do
-  pos <- position
-  keyword "tag"
-  e1 <- upper
-  colon
-  e2 <- typ0
-  return $ Syntax.TagDec pos e1 e2
 
 modDec :: AmbiguousParser Syntax.Dec
 modDec = do

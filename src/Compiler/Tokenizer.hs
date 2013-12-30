@@ -110,7 +110,7 @@ upper :: Position -> Position -> ReversedString -> Tokenizer
 upper pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (UpperToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
-        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c == '.'
+        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
                   = upper (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (UpperToken (reverse cs)) (present c $ tok pos')
 
@@ -126,6 +126,6 @@ dotUpper :: Position -> Position -> ReversedString -> Tokenizer
 dotUpper pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (DotUpperToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
-        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c == '.'
+        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
                   = dotUpper (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (DotUpperToken (reverse cs)) (present c $ tok pos')

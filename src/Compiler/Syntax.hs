@@ -12,7 +12,6 @@ data Dec = FunDec Pos String [String] [Pat] Typ Term
          | ModDec Pos String [Dec]
          | NewDec Pos String Qual [Typ]
          | SumDec Pos String [String] [(Pos, String, [Typ])]
-         | TagDec Pos String Typ
          | UnitDec Pos String [String] [Dec]
            deriving (Eq, Show)
 
@@ -54,8 +53,8 @@ funType []     t = typType t
 funType (p:ps) t = Type.Arrow (patType p) (funType ps t)
 
 constructorType :: [Typ] -> [String] -> [String] -> Type.Type
-constructorType []       s1 ss = Type.Variant s1 (map Type.Variable ss)
-constructorType (ty:tys) s1 ss = Type.Arrow (typType ty) (constructorType tys s1 ss)
+constructorType []       q ss = Type.Variant q (map Type.Variable ss)
+constructorType (ty:tys) q ss = Type.Arrow (typType ty) (constructorType tys q ss)
 
 patType :: Pat -> Type.Type
 patType (AscribePat p ty) = typType ty -- not sure about this

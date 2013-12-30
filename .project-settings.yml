@@ -14,6 +14,4 @@ ghc-args:
 - -fno-warn-name-shadowing
 - -fno-warn-unused-matches
 - -fno-warn-unused-binds
-excluded-modules:
-- src/Compiler/Driver.hs
-- src/Compiler/Meta.hs
+excluded-modules: []

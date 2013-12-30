@@ -51,9 +51,6 @@ inferDec (Syntax.FunDec pos s ss ps ty t) = do
   where g = either (\ _ -> error "impossible") id $ gammaWithPats g sigmaEmpty ps tys'
         tys' = map Syntax.patType ps
 
-inferDec (Syntax.TagDec pos s ty) =
-  Right $ Syntax.TagDec pos s ty
-
 inferDec (Syntax.ModDec pos s ds) =
   case inferDecs ds of
     Left msg -> Left msg
