@@ -1,6 +1,6 @@
 module Compiler.Interpreter where
 
-import           Control.Monad   (zipWithM)
+import           Control.Monad   ((<=<), zipWithM)
 
 import           Compiler.Lambda
 
@@ -9,7 +9,7 @@ data Value = VariantValue ConstructorIndex [Value]
            | StringValue String
            | TagValue { tagValue :: TagIdent }
            | TupleValue { tupleValue :: [Value] }
-           | ClosureValue { closureValue :: (Value -> Result Value) }
+           | ClosureValue { closureValue :: Value -> Result Value }
 
 variantValue :: Value -> (ConstructorIndex, [Value])
 variantValue (VariantValue d vs) = (d, vs)
@@ -39,14 +39,14 @@ data Result a where
   Escape         :: TagIdent -> Value -> Result Value
   LookupFunction :: FunctionIdent -> Result Function
   LookupTag      :: TagIdent -> Result String
-  LookupVariant  :: VariantIdent -> (Result Variant)
+  LookupVariant  :: VariantIdent -> Result Variant
   GetTypeEnv     :: Result [(TypeIdent, Type)]
   GetValueEnv    :: Result [(ValueIdent, Value)]
 
 instance Monad Result where
   return = Return
   Return x >>= f = f x
-  Bind m g >>= f = Bind m (\ x -> f =<< g x)
+  Bind m g >>= f = Bind m (f <=< g)
   m        >>= f = Bind m f
 
 instance Show (Result a) where
