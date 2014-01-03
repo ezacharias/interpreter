@@ -51,11 +51,35 @@ builtinEnv = Env [ ( "Escape"
                    )
                  ]
                  []
-                 [ ( "Exit"
+                 [ ( "Concatenate"
+                   , ([], Type.Arrow (Type.Tuple [Type.String, Type.String]) Type.String)
+                   )
+                 , ( "Continue"
+                   , ([], Type.Arrow (Type.Arrow Type.Unit (Type.Variant ["Output"] [])) (Type.Variant ["Output"] []))
+                   )
+                 , ( "Exit"
                    , ([], Type.Variant ["Output"] [])
                    )
+                 , ( "Show"
+                   , (["a"], Type.Arrow (Type.Variable "a") Type.String)
+                   )
+                 , ( "Write"
+                   , ([], Type.Arrow Type.String (Type.Arrow (Type.Variant ["Output"] []) (Type.Variant ["Output"] [])))
+                   )
+                 , ( "Unreachable"
+                   , (["a"], Type.Variable "a")
+                   )
                  ]
-                 []
+                 [ ( "Continue"
+                   , ([], [Type.Arrow Type.Unit (Type.Variant ["Output"] [])], Type.Variant ["Output"] [])
+                   )
+                 , ( "Exit"
+                   , ([], [], Type.Variant ["Output"] [])
+                   )
+                 , ( "Write"
+                   , ([], [Type.String, Type.Variant ["Output"] []], Type.Variant ["Output"] [])
+                   )
+                 ]
 
 envWithUnit :: Env -> String -> ([String], Env) -> Env
 envWithUnit (Env x1s x2s x3s x4s) s x = Env ((s,x):x1s) x2s x3s x4s

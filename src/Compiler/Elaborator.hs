@@ -45,9 +45,18 @@ builtinName = Name [ ( "Escape"
                      )
                    ]
                    []
-                   ["Output"]
-                   [("Exit", 0)]
-                   ["Exit"]
+                   ["Output", "String"]
+                   [ ("Continue", 1)
+                   , ("Exit", 0)
+                   , ("Write", 2)
+                   ]
+                   [ "Concatenate"
+                   , "Continue"
+                   , "Exit"
+                   , "Show"
+                   , "Write"
+                   , "Unreachable"
+                   ]
 
 nameWithUnit :: Name -> String -> Name -> Name
 nameWithUnit (Name x1s x2s x3s x4s x5s) s n = Name ((s, n) : x1s) x2s x3s x4s x5s
@@ -175,13 +184,57 @@ emptyEnv = Env [] [] [] []
 
 populateEnv :: M ()
 populateEnv = do
-  -- exportVariant
+
   d <- lookupVariant ["Output"]
   exportVariant d (Lambda.Variant [] ["Output"] [[]])
+
+  -- Dunno about this.
+  d <- lookupVariant ["String"]
+  exportVariant d (Lambda.Variant [] ["String"] [[]])
+
   d <- lookupUnit ["Escape"]
   exportUnitClosure d (UnitClosure f)
+
+  d <- lookupFunction ["Concatenate"]
+  d1 <- gen
+  d2 <- gen
+  d3 <- gen
+  d4 <- gen
+  exportFunction d (Lambda.Function [] undefined
+                     (Lambda.LambdaTerm d2 (Lambda.TupleType [undefined, undefined])
+                       (Lambda.UntupleTerm [d3, d4] (Lambda.VariableTerm d2)
+                         (Lambda.ConcatenateTerm (Lambda.VariableTerm d3) (Lambda.VariableTerm d4)))))
+
+  d <- lookupFunction ["Continue"]
+  d1 <- gen
+  d2 <- gen
+  exportFunction d (Lambda.Function [] undefined
+                     (Lambda.LambdaTerm d1 Lambda.StringType
+                       (Lambda.LambdaTerm d2 undefined
+                         (Lambda.ConstructorTerm undefined [] 1 [Lambda.VariableTerm d1, Lambda.VariableTerm d2]))))
+
   d <- lookupFunction ["Exit"]
   exportFunction d (Lambda.Function [] undefined (Lambda.ConstructorTerm undefined [] 0 []))
+
+  d <- lookupFunction ["Show"]
+  d1 <- gen
+  d2 <- gen
+  exportFunction d (Lambda.Function [d1] undefined
+                     (Lambda.LambdaTerm d2 (Lambda.VariableType d1)
+                       (Lambda.ShowTerm (Lambda.VariableType d1) (Lambda.VariableTerm d2))))
+
+  d <- lookupFunction ["Write"]
+  d1 <- gen
+  d2 <- gen
+  exportFunction d (Lambda.Function [] undefined
+                     (Lambda.LambdaTerm d1 undefined
+                       (Lambda.LambdaTerm d2 undefined
+                         (Lambda.ConstructorTerm undefined [] 2 [Lambda.VariableTerm d1, Lambda.VariableTerm d2]))))
+
+  d <- lookupFunction ["Unreachable"]
+  exportFunction d (Lambda.Function [] undefined (Lambda.UnreachableTerm undefined))
+
+
   where f [ty1, ty2] r =
           withRenameStack [r] $ do
             d1 <- gen
@@ -370,6 +423,21 @@ convertTypeType (Type.Variable s)     =    lookupType s
 convertTypeType (Type.Variant q tys)  = do d <- lookupVariant q
                                            tys <- mapM convertTypeType tys
                                            return $ Lambda.VariantType d tys
+
+lookupConstructor :: [String] -> M Int
+lookupConstructor q = do rs <- getRenameStack
+                         return $ renameStackLookupConstructor rs q
+
+renameStackLookupConstructor :: [Rename] -> [String] -> Int
+renameStackLookupConstructor []     q = error $ "impossible: " ++ show q
+renameStackLookupConstructor (r:rs) q = fromMaybe failure (renameLookupConstructor r q)
+  where failure = renameStackLookupConstructor rs q
+
+renameLookupConstructor :: Rename -> [String] -> Maybe Int
+renameLookupConstructor r []    = error "impossible"
+renameLookupConstructor r [s]   = lookup s (renameConstructors r)
+renameLookupConstructor r (s:q) = do r <- lookup s (renameMods r)
+                                     renameLookupConstructor r q
 
 lookupFunction :: [String] -> M Int
 lookupFunction q = do rs <- getRenameStack

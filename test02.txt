@@ -34,7 +34,8 @@
 
 
     Main : Output
-      G.With()(F)
+      Write("Hello")(Exit)
+      -- G.With()(F)
 
     F() : Output
       G.Get

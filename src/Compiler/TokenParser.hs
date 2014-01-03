@@ -50,10 +50,10 @@ failure = failurePos =<< position
 
 alt :: AmbiguousParser a -> AmbiguousParser a -> AmbiguousParser a
 alt p1 p2 = AmbiguousParser (\ k l c -> check (runAmbiguousParser p1 k l c) (runAmbiguousParser p2 k l c))
-  where check (TokenParserFinished x)      (TokenParserFinished _)      = TokenParserFinished x
-        check (TokenParserFinished x)      (TokenParserTokenRequest _)  = error "Compiler.TokenParser.alt: impossible"
+  where check (TokenParserFinished _)      (TokenParserFinished _)      = error "Compiler.TokenParser.alt: ambiguous syntax"
+        check (TokenParserFinished _)      (TokenParserTokenRequest _)  = error "Compiler.TokenParser.alt: impossible"
         check (TokenParserFinished x)      (TokenParserError _ _)       = TokenParserFinished x
-        check (TokenParserTokenRequest k)  (TokenParserFinished _)      = error "Compiler.TokenParser.alt: impossible"
+        check (TokenParserTokenRequest _)  (TokenParserFinished _)      = error "Compiler.TokenParser.alt: impossible"
         check (TokenParserTokenRequest k1) (TokenParserTokenRequest k2) = TokenParserTokenRequest (\ x -> check (k1 x) (k2 x))
         check (TokenParserTokenRequest k)  (TokenParserError _ _)       = TokenParserTokenRequest k
         check (TokenParserError pos msg)   (TokenParserFinished x)      = TokenParserFinished x
@@ -187,6 +187,8 @@ rightParen = isToken RightParenToken
 
 rightBracket :: AmbiguousParser ()
 rightBracket = isToken RightBracketToken
+
+-- Keywords can be shadowed by local variable bindings.
 
 keyword :: String -> AmbiguousParser ()
 keyword s1 = do

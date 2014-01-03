@@ -85,11 +85,11 @@ loop ns fs r = loop1 r
         loop1 (Bind GetValueEnv k) = loop1 $ k []
         loop1 m = loop1 $ Bind m Return
         exitIndex = 0
-        writeIndex = 1
-        continueIndex = 2
+        continueIndex = 1
+        writeIndex = 2
         loop2 (VariantValue d [])                 | d == exitIndex     = ExitStatus
-        loop2 (VariantValue d [StringValue s, v]) | d == writeIndex    = WriteStatus s $ loop2 v
         loop2 (VariantValue d [ClosureValue k])   | d == continueIndex = loop1 $ k UnitValue
+        loop2 (VariantValue d [StringValue s, v]) | d == writeIndex    = WriteStatus s $ loop2 v
         loop2 _ = error "Compiler.Interpreter.loop: impossible"
 
 
@@ -106,6 +106,11 @@ eval (ApplyTerm e1 e2)          = do { v1 <- eval e1; v2 <- eval e2; (closureVal
 eval (BindTerm d e1 e2)         = do { v1 <- eval e1; bind [d] [v1] e2 }
 -- eval (CaseTerm e cs)            = do { v <- eval e; evalCase cs (variantValue v) }
 eval (CatchTerm e1 e2 d1 d2 e3) = do { tag <- eval e1; evalCatchTerm (tagValue tag) (eval e2) d1 d2 e3 }
+eval (ConcatenateTerm e1 e2)    = do v1 <- eval e1
+                                     v2 <- eval e2;
+                                     case (v1, v2) of
+                                       (StringValue s1, StringValue s2) -> Return $ StringValue (s1 ++ s2)
+                                       _ -> error "unreachable"
 eval (ConstructorTerm _ _ d es) = mapM eval es >>= Return . VariantValue d
 eval (IsEqualTerm t e1 e2)      = do { t' <- evalType t; v1 <- eval e1; v2 <- eval e2; evalIsEqualTerm t' v1 v2 }
 eval (LambdaTerm d t e)         = do xs <- GetTypeEnv
@@ -125,7 +130,7 @@ eval (TupleTerm ts)             = mapM eval ts >>= Return . TupleValue
 eval (TypeApplyTerm d ts)       = do { ts' <- mapM evalType ts; x <- LookupFunction d; typeApplyTerm ts' x }
 eval (ShowTerm t e)             = do { t' <- evalType t; v <- eval e; evalShowValue t' v }
 eval UnitTerm                   = Return UnitValue
-eval (Unreachable _)            = error "Interpreter: Unreachable"
+eval (UnreachableTerm _)        = error "Interpreter: Unreachable"
 eval (UntupleTerm ds e1 e2)     = do { v <- eval e1; bind ds (tupleValue v) e2 }
 eval (VariableTerm d)           = do r <- GetValueEnv
                                      return $ maybe (error "interpreter variable term") id (lookup d r)

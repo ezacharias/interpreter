@@ -412,6 +412,9 @@ unify s (Type.Metavariable x1) t2 =
 unify s t1 (Type.Metavariable x2) =
   unify s (Type.Metavariable x2) t1
 
+unify s Type.String Type.String =
+  return (Type.String, s)
+
 unify s (Type.Tuple tys1) (Type.Tuple tys2) = do
   (tys3, s) <- unifys s tys1 tys2
   return (Type.Tuple tys3, s)

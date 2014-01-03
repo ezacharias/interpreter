@@ -41,6 +41,7 @@ data Term = ApplyTerm Term Term
           | BindTerm ValueIdent Term Term
        -- | CaseTerm Term [([ValueIdent], Term)]
           | CatchTerm Term Term ValueIdent ValueIdent Term
+          | ConcatenateTerm Term Term
           | ConstructorTerm VariantIdent [Type] ConstructorIndex [Term]
           | IsEqualTerm Type Term Term
           | LambdaTerm ValueIdent Type Term
@@ -53,7 +54,7 @@ data Term = ApplyTerm Term Term
           | TupleTerm [Term]
           | TypeApplyTerm FunctionIdent [Type]
           | UnitTerm
-          | Unreachable Type
+          | UnreachableTerm Type
           | UntupleTerm [ValueIdent] Term Term
           | VariableTerm ValueIdent
             deriving (Eq, Show)

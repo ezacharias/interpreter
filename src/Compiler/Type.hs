@@ -2,6 +2,8 @@ module Compiler.Type where
 
 type Metavariable = Int
 
+-- Make sure to modify TypeChecker.unify when changing Type.
+
 data Type = Arrow Type Type
           | Metavariable Metavariable
           | String
