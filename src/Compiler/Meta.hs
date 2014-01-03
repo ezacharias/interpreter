@@ -123,6 +123,7 @@ conSubstitute = error "cs"
 typeSubstitute :: [String] -> [String] -> [(String, Type.Type)] -> Type.Type -> Type.Type
 typeSubstitute q1 q2 ps (Type.Arrow ty1 ty2)  = Type.Arrow (typeSubstitute q1 q2 ps ty1) (typeSubstitute q1 q2 ps ty2)
 typeSubstitute q1 q2 ps (Type.Metavariable i) = Type.Metavariable i
+typeSubstitute q1 q2 ps Type.String           = Type.String
 typeSubstitute q1 q2 ps (Type.Tuple tys)      = Type.Tuple (map (typeSubstitute q1 q2 ps) tys)
 typeSubstitute q1 q2 ps Type.Unit             = Type.Unit
 typeSubstitute q1 q2 ps (Type.Variable s)     = fromMaybe (Type.Variable s) (lookup s ps)
@@ -217,6 +218,8 @@ convertTerm t =
       t1' <- convertTerm t1
       t2' <- convertTerm t2
       return $ SeqTerm t1' t2'
+    StringTerm pos s -> do
+      return $ StringTerm pos s
     TupleTerm pos _ ts -> do
       ms <- mapM gen1 ts
       ts' <- mapM convertTerm ts

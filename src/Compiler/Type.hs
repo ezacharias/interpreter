@@ -4,6 +4,7 @@ type Metavariable = Int
 
 data Type = Arrow Type Type
           | Metavariable Metavariable
+          | String
           | Tuple [Type]
           | Unit
           | Variable String
@@ -13,6 +14,7 @@ data Type = Arrow Type Type
 rename :: [(String, Type)] -> Type -> Type
 rename r (Arrow t1 t2)    = Arrow (rename r t1) (rename r t2)
 rename r (Metavariable n) = Metavariable n
+rename r String           = String
 rename r (Tuple ts)       = Tuple (map (rename r) ts)
 rename r Unit             = Unit
 rename r (Variable s)     = maybe (Variable s) id (lookup s r)
@@ -23,6 +25,7 @@ replace x t (Arrow t1 t2)    = Arrow (replace x t t1) (replace x t t2)
 replace x t (Metavariable n)
                  | x == n    = t
                  | otherwise = Metavariable n
+replace x t String           = String
 replace x t (Tuple ts)       = Tuple (map (replace x t) ts)
 replace x t Unit             = Unit
 replace x t (Variable s)     = Variable s

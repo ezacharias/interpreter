@@ -20,6 +20,7 @@ data Term = ApplyTerm Type.Type Term Term
           | BindTerm Type.Type Pat Term Term
           | CaseTerm Type.Type Term [Rule]
           | SeqTerm Term Term
+          | StringTerm Pos String
           | TupleTerm Pos [Type.Type] [Term]
           | UnitTerm Pos
           | UpperTerm Pos [Type.Type] Type.Type Qual

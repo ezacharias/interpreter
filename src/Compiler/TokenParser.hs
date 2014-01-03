@@ -114,9 +114,12 @@ eof = AmbiguousParser check
         response k l c (filename, pos, Nothing)  = k () l c
         response k l c (filename, pos, Just tok) = TokenParserError pos ""
 
+topLevelIndentation :: Int
+topLevelIndentation = 4
+
 program :: AmbiguousParser Syntax.Program
 program = do
-  xs <- many (indented 1 dec)
+  xs <- many (indented (1 + topLevelIndentation) dec)
   eof
   return $ Syntax.Program xs
 
@@ -153,6 +156,15 @@ lower = do
   t <- token
   case t of
     LowerToken x -> return x
+    _ -> failurePos pos
+
+
+string :: AmbiguousParser String
+string = do
+  pos <- position
+  t <- token
+  case t of
+    StringToken x -> return x
     _ -> failurePos pos
 
 comma :: AmbiguousParser ()
@@ -291,6 +303,9 @@ exp3 = choice [ do pos <- position
               , do pos <- position
                    x <- qual
                    return $ Syntax.UpperTerm pos [] Type.Unit x
+              , do pos <- position
+                   x <- string
+                   return $ Syntax.StringTerm pos x
               , exp4
               ]
 

@@ -32,4 +32,5 @@ data Token = EqualsToken
            | UnderbarToken
            | ComposeToken
            | BangToken
+           | StringToken String
   deriving (Eq, Show)

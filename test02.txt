@@ -3,28 +3,61 @@
 -- Unreachable : a
 -- Exit : Output
 
-unit Box⟦t⟧
 
-  new E = Escape⟦(), t⟧
+-- This is a comment. As you can see, we generally use whitespace and nothing else.
+-- It makes programs very clear and easy to understand.
 
-  With⟦a⟧(x : t)(f : () ⟶ a) : a
-    E.Catch(f)(C(x))
 
-  C⟦a⟧(x : t)()(f : t ⟶ a) : a
-    f(x)
+    unit Getter⟦t⟧
 
-  Get : t
-    E.Throw()
+      new E = Escape⟦(), t⟧
 
-new E = Escape⟦(), Bool⟧
+      With⟦a⟧(x : t)(f : () ⟶ a) : a
+        E.Catch(f)(C(x))
 
-sum Bool
-  False
-  True
+      C⟦a⟧(x : t)()(f : t ⟶ a) : a
+        f(x)
 
-Main : Output
-  Exit
+      Get : t
+        E.Throw()
 
--- sum List⟦a⟧
---   Nil
---   Cons(a, List⟦a⟧)
+    new G = Getter⟦()⟧
+
+    sum Bool
+      False
+      True
+
+
+-- A text line starts at column 1. It proceeds until there are two empty lines.
+-- This means you can be fairly freeform with paragraphs without causing
+-- interference with code.
+
+
+    Main : Output
+      G.With()(F)
+
+    F() : Output
+      G.Get
+      Exit
+
+    Identity⟦a⟧(x : a) : a
+      x
+
+    Compose⟦a, b, c⟧(f : b ⟶ c)(g : a ⟶ b)(x : a) : c
+      f(g(x))
+
+    Constant⟦a, b⟧(x : a)(y : b) : a
+      x
+
+
+-- Code is commonly commented out using a different syntax than text comments.
+-- These are usually gutter comments, which don't indent the code at all.
+
+
+--   - Text comments use a single dash in the gutter. Code comments use a
+--   - greater-than sign. To allow a text editor to syntax-color them.
+
+--   > sum List⟦a⟧
+--   >   Nil
+--   >   Cons(a, List⟦a⟧)
+

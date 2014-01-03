@@ -45,7 +45,7 @@ builtinName = Name [ ( "Escape"
                      )
                    ]
                    []
-                   []
+                   ["Output"]
                    [("Exit", 0)]
                    ["Exit"]
 
@@ -102,11 +102,12 @@ data Rename = Rename
                 , renameConstructors :: [(String, Lambda.ConstructorIndex)]
                 , renameFunctions    :: [(String, Lambda.TagIdent)]
                 , renameTypes        :: [(String, Lambda.Type)]
+                , renameValues       :: [(String, Lambda.ValueIdent)]
                 }
               deriving (Eq, Show)
 
 emptyRename :: Rename
-emptyRename = Rename [] [] [] [] [] []
+emptyRename = Rename [] [] [] [] [] [] []
 
 update :: Name -> M Rename
 update (Name x1s x2s x3s x4s x5s) = do
@@ -114,7 +115,7 @@ update (Name x1s x2s x3s x4s x5s) = do
   x2s <- mapM updateModule x2s
   x3s <- mapM updateName x3s
   x5s <- mapM updateName x5s
-  return $ Rename x1s x2s x3s x4s x5s []
+  return $ Rename x1s x2s x3s x4s x5s [] []
 
 updateUnit :: (String, Name) -> M (String, Int)
 updateUnit (s, _) = updateName s
@@ -174,6 +175,9 @@ emptyEnv = Env [] [] [] []
 
 populateEnv :: M ()
 populateEnv = do
+  -- exportVariant
+  d <- lookupVariant ["Output"]
+  exportVariant d (Lambda.Variant [] ["Output"] [[]])
   d <- lookupUnit ["Escape"]
   exportUnitClosure d (UnitClosure f)
   d <- lookupFunction ["Exit"]
@@ -257,6 +261,10 @@ convertCurried (p:ps) t = do
 convertPat :: Int -> Syntax.Pat -> M a -> M a
 convertPat d p m =
   case p of
+    Syntax.AscribePat p ty ->
+      convertPat d p m
+    Syntax.LowerPat _ s ->
+      withValueRename s d m
     Syntax.UnitPat _ ->
       m
     p -> error $ "cp: " ++ show p
@@ -264,10 +272,26 @@ convertPat d p m =
 convertTerm :: Syntax.Term -> M Lambda.Term
 convertTerm t =
   case t of
+    Syntax.ApplyTerm _ t1 t2 -> do
+      t1 <- convertTerm t1
+      t2 <- convertTerm t2
+      return $ Lambda.ApplyTerm t1 t2
+    Syntax.SeqTerm t1 t2 -> do
+      d  <- gen
+      t1 <- convertTerm t1
+      t2 <- convertTerm t2
+      return $ Lambda.BindTerm d t1 t2
+    Syntax.StringTerm _ x ->
+      return $ Lambda.StringTerm x
+    Syntax.UnitTerm _ ->
+      return Lambda.UnitTerm
     Syntax.UpperTerm _ tys _ q -> do
       d   <- lookupFunction q
       tys <- mapM convertTypeType tys
       return $ Lambda.TypeApplyTerm d tys
+    Syntax.VariableTerm _ s -> do
+      d <- lookupValueRename s
+      return $ Lambda.VariableTerm d
     _ -> error $ "ct: " ++ show t
 
 
@@ -338,6 +362,7 @@ convertTypeType (Type.Arrow ty1 ty2)  = do ty1 <- convertTypeType ty1
                                            ty2 <- convertTypeType ty2
                                            return $ Lambda.ArrowType ty1 ty2
 convertTypeType (Type.Metavariable _) =    error "convertTypeType"
+convertTypeType Type.String           =    return Lambda.StringType
 convertTypeType (Type.Tuple tys)      = do tys <- mapM convertTypeType tys
                                            return $ Lambda.TupleType tys
 convertTypeType Type.Unit             =    return Lambda.UnitType
@@ -452,7 +477,7 @@ getRenameStack = M f
                  where f k = k
 
 withTypeRenames :: [String] -> [Lambda.Type] -> M a -> M a
-withTypeRenames ss tys m = M (\ k rs -> runM m k (Rename [] [] [] [] [] (zip ss tys) : rs))
+withTypeRenames ss tys m = M (\ k rs -> runM m k (Rename [] [] [] [] [] (zip ss tys) [] : rs))
 
 lookupUnitClosure :: Int -> M UnitClosure
 lookupUnitClosure d = M (\ k rs v -> k (fromMaybe failure (lookup d (envUnitClosures v))) v)
@@ -463,6 +488,22 @@ withRenameStack rs m =  M (\ k _ -> runM m k rs)
 
 withRename :: Rename -> M a -> M a
 withRename r m = M (\ k rs -> runM m k (r:rs))
+
+lookupValueRename :: String -> M Lambda.ValueIdent
+lookupValueRename s = do
+  rs <- getRenameStack
+  case rs of
+    [] -> error "lookupValueRename"
+    (r:_) -> return $ fromMaybe (error "lookupValueRename") (lookup s (renameValues r))
+
+withValueRename :: String -> Lambda.ValueIdent -> M a -> M a
+withValueRename s d m = do
+  rs <- getRenameStack
+  case rs of
+    [] -> error "withValueRename"
+    (Rename x1s x2s x3s x4s x5s x6s x7s : rs) ->
+      withRenameStack (Rename x1s x2s x3s x4s x5s x6s ((s, d) : x7s) : rs)
+        m
 
 
 {-

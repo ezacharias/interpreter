@@ -126,6 +126,7 @@ concreteTerm s (Syntax.BindTerm m p t1 t2)  = Syntax.BindTerm (concreteType s m)
 concreteTerm s (Syntax.CaseTerm m t rs)     = Syntax.CaseTerm (concreteType s m) (concreteTerm s t) (map (concreteRule s) rs)
 concreteTerm s (Syntax.VariableTerm p x)    = Syntax.VariableTerm p x
 concreteTerm s (Syntax.SeqTerm t1 t2)       = Syntax.SeqTerm (concreteTerm s t1) (concreteTerm s t2)
+concreteTerm s (Syntax.StringTerm p x)      = Syntax.StringTerm p x
 concreteTerm s (Syntax.TupleTerm p ms xs)   = Syntax.TupleTerm p (map (concreteType s) ms) (map (concreteTerm s) xs)
 concreteTerm s (Syntax.UnitTerm p)          = Syntax.UnitTerm p
 concreteTerm s (Syntax.UpperTerm p ts ty x) = Syntax.UpperTerm p (map (concreteType s) ts) (concreteType s ty) x
@@ -143,6 +144,7 @@ concreteType :: Sigma -> Type.Type -> Type.Type
 
 concreteType s (Type.Arrow t1 t2)    = Type.Arrow (concreteType s t1) (concreteType s t2)
 concreteType s (Type.Metavariable x) = maybe Type.Unit id (sigmaLookup s x)
+concreteType s Type.String           = Type.String
 concreteType s (Type.Tuple ts)       = Type.Tuple (map (concreteType s) ts)
 concreteType s Type.Unit             = Type.Unit
 concreteType s (Type.Variable x)     = Type.Variable x
@@ -153,6 +155,7 @@ isConcreteType :: Type.Type -> Bool
 
 isConcreteType (Type.Arrow t1 t2)    = isConcreteType t1 && isConcreteType t2
 isConcreteType (Type.Metavariable x) = False
+isConcreteType Type.String           = True
 isConcreteType (Type.Tuple ts)       = all isConcreteType ts
 isConcreteType Type.Unit             = True
 isConcreteType (Type.Variable x)     = True
@@ -167,6 +170,7 @@ updateType :: Sigma -> Type.Type -> Type.Type
 
 updateType s (Type.Arrow t1 t2)    = Type.Arrow (updateType s t1) (updateType s t2)
 updateType s (Type.Metavariable x) = maybe (Type.Metavariable x) id (sigmaLookup s x)
+updateType s Type.String           = Type.String
 updateType s (Type.Tuple ts)       = Type.Tuple (map (updateType s) ts)
 updateType s Type.Unit             = Type.Unit
 updateType s (Type.Variable x)     = Type.Variable x
@@ -276,6 +280,12 @@ typeCheckTerm g s ty (Syntax.SeqTerm t1 t2) =
     Left msg -> Left msg
     Right s -> typeCheckTerm g s ty t2
 
+typeCheckTerm g s ty (Syntax.StringTerm p x) =
+  case unify s ty Type.String of
+    Nothing -> errorMsg s p ty Type.String
+    Just (Type.String, s) -> Right s
+    Just _ -> unreachable
+
 typeCheckTerm g s ty (Syntax.TupleTerm p ms xs) =
   case unify s ty (Type.Tuple ms) of
     Nothing -> errorMsg s p ty (Type.Tuple ms)
@@ -342,6 +352,8 @@ showType r (Type.Metavariable x) = f 0 r
                                  in (s, y:r')
         c n             = let (q, r) = quotRem n 26
                            in toEnum (fromEnum 'a' + r) : (if q == 0 then "" else show q) ++ "?"
+
+showType r Type.String = ("String", r)
 
 showType r (Type.Tuple ts) =
   ("(" ++ concat (intersperse ", " xs) ++ ")", r')
