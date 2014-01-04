@@ -227,12 +227,12 @@ convertTerm t =
     AscribeTerm pos t ty -> do
       t' <- convertTerm t
       return $ AscribeTerm pos t' ty
-    BindTerm pos p t1 t2 -> do
+    BindTerm _ p t1 t2 -> do
       m <- gen
       p' <- convertPat p
       t1' <- convertTerm t1
       t2' <- convertTerm t2
-      return $ BindTerm pos p' t1' t2'
+      return $ BindTerm m p' t1' t2'
     CaseTerm _ t rs -> do
       m <- gen
       t' <- convertTerm t

@@ -69,7 +69,8 @@ hParse filename handle = parse (parser filename)
   where parse :: Parser -> Driver Syntax.Program
         parse (ParserFinished prog)              = return prog
         parse (ParserCharRequest k)              = liftIO (maybeHGetChar handle) >>= (parse . k)
-        parse (ParserError (line, col) _)        = DriverError $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Parser error."
+        parse (ParserError (line, col) "")       = DriverError $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Parser error."
+        parse (ParserError (line, col) msg)      = DriverError $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Parser error. " ++ msg
         parse (ParserTokenizerError (line, col)) = DriverError $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Tokenizer error."
 
 maybeHGetChar :: Handle -> IO (Maybe Char)

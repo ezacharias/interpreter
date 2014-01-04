@@ -329,6 +329,11 @@ convertTerm t =
       t1 <- convertTerm t1
       t2 <- convertTerm t2
       return $ Lambda.ApplyTerm t1 t2
+    Syntax.BindTerm _ p t1 t2 -> do
+      d <- gen
+      t1 <- convertTerm t1
+      t2 <- convertPat d p $ convertTerm t2
+      return $ Lambda.BindTerm d t1 t2
     Syntax.SeqTerm t1 t2 -> do
       d  <- gen
       t1 <- convertTerm t1

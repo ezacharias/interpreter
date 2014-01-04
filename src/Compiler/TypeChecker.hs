@@ -181,7 +181,7 @@ typeCheckPat :: Sigma -> Type.Type -> Syntax.Pat -> Either String (Type.Type, Si
 
 typeCheckPat s ty (Syntax.AscribePat p ty2) =
   case unify s ty (Syntax.typType ty2) of
-    Nothing -> Left undefined
+    Nothing -> Left undefined -- $ show ty ++ " " ++ show (Syntax.typType ty2)
     Just (ty, s) -> typeCheckPat s ty p
 
 typeCheckPat s ty (Syntax.LowerPat _ x) = Right (ty, s)

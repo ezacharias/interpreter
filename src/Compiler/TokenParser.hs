@@ -17,11 +17,43 @@ data TokenParser a = TokenParserFinished a
                    | TokenParserError Position String
 
 tokenParser :: TokenParser Syntax.Program
-tokenParser = runAmbiguousParser ambiguousParser (\ x _ _ -> TokenParserFinished x) 0 Nothing
+tokenParser = runAmbiguousParser ambiguousParser (\ x _ _ _ -> TokenParserFinished x) 0 Nothing emptyEnv
+
+newtype Env = Env { envVal :: [String] }
+
+emptyEnv :: Env
+emptyEnv = Env []
+
+envWith :: Env -> [String] -> Env
+envWith (Env ss1) ss2 = Env (ss2 ++ ss1)
+
+patLocals :: Syntax.Pat -> [String]
+patLocals (Syntax.AscribePat p _)      = patLocals p
+patLocals (Syntax.LowerPat _ s)        = [s]
+patLocals (Syntax.TuplePat _ ps)       = concat (map patLocals ps)
+patLocals Syntax.UnderbarPat           = []
+patLocals (Syntax.UnitPat _)           = []
+patLocals (Syntax.UpperPat _ _ _ _ ps) = concat (map patLocals ps)
+
+withPatLocals :: Syntax.Pat -> AmbiguousParser a -> AmbiguousParser a
+withPatLocals pat p = do
+  let ss = patLocals pat
+  r <- localEnv
+  withLocalEnv (envWith r ss) p
+
+withPatsLocals :: [Syntax.Pat] -> AmbiguousParser a -> AmbiguousParser a
+withPatsLocals pats p = do
+  let ss = concat (map patLocals pats)
+  r <- localEnv
+  withLocalEnv (envWith r ss) p
+
+
+-- The continuation takes a line and a possible column.
 
 -- | An ambiguous parser takes a continuation, but may call the continuation multiple times with different results.
-newtype AmbiguousParser a = AmbiguousParser ((a -> Int -> Maybe Int -> TokenParser Syntax.Program)
-                                                -> Int -> Maybe Int -> TokenParser Syntax.Program)
+newtype AmbiguousParser a = AmbiguousParser ((a -> AmbiguousParserContinuation) -> AmbiguousParserContinuation)
+
+type AmbiguousParserContinuation = Int -> Maybe Int -> Env -> TokenParser Syntax.Program
 
 instance Monad AmbiguousParser where
   return x = AmbiguousParser (\ k -> k x)
@@ -39,17 +71,20 @@ instance Alternative AmbiguousParser where
   empty = failure
   (<|>) = alt
 
-runAmbiguousParser :: AmbiguousParser a -> (a -> Int -> Maybe Int -> TokenParser Syntax.Program) -> Int -> Maybe Int -> TokenParser Syntax.Program
+runAmbiguousParser :: AmbiguousParser a -> (a -> AmbiguousParserContinuation) -> AmbiguousParserContinuation
 runAmbiguousParser (AmbiguousParser f) = f
 
+failurePosMsg :: Syntax.Pos -> String -> AmbiguousParser a
+failurePosMsg (Syntax.Pos _ line col) msg = AmbiguousParser (\ _ _ _ _ -> TokenParserError (line, col) msg)
+
 failurePos :: Syntax.Pos -> AmbiguousParser a
-failurePos (Syntax.Pos _ line col) = AmbiguousParser (\ _ _ _ -> TokenParserError (line, col) "")
+failurePos pos = failurePosMsg pos ""
 
 failure :: AmbiguousParser a
 failure = failurePos =<< position
 
 alt :: AmbiguousParser a -> AmbiguousParser a -> AmbiguousParser a
-alt p1 p2 = AmbiguousParser (\ k l c -> check (runAmbiguousParser p1 k l c) (runAmbiguousParser p2 k l c))
+alt p1 p2 = AmbiguousParser (\ k l c r -> check (runAmbiguousParser p1 k l c r) (runAmbiguousParser p2 k l c r))
   where check (TokenParserFinished _)      (TokenParserFinished _)      = error "Compiler.TokenParser.alt: ambiguous syntax"
         check (TokenParserFinished _)      (TokenParserTokenRequest _)  = error "Compiler.TokenParser.alt: impossible"
         check (TokenParserFinished x)      (TokenParserError _ _)       = TokenParserFinished x
@@ -85,22 +120,31 @@ ambiguousParser = program
 
 token :: AmbiguousParser Token
 token = AmbiguousParser check
-  where check k l c = TokenParserTokenRequest (response k l c)
-        response k _ _          (filename, (l2, c2), Nothing)    = TokenParserError (l2, c2) ""
-        response k l1 Nothing   (filename, (l2, c2), Just tok)
-          | l1 == l2 = k tok l2 Nothing
+  where check k l c r = TokenParserTokenRequest (response k l c r)
+        response k _ _ _ (filename, (l2, c2), Nothing) = TokenParserError (l2, c2) ""
+        response k l1 Nothing r (filename, (l2, c2), Just tok)
+          | l1 == l2 = k tok l2 Nothing r
           | otherwise = TokenParserError (l2, c2) ""
-        response k l1 (Just c1) (filename, (l2, c2), Just tok)
-          | l1 == l2 && c1 == c2  = k tok l2 Nothing
+        response k l1 (Just c1) r (filename, (l2, c2), Just tok)
+          | l1 == l2 && c1 == c2  = k tok l2 Nothing r
           | otherwise = TokenParserError (l2, c2) ""
 
 position :: AmbiguousParser Syntax.Pos
 position = AmbiguousParser check
-  where check k l c = TokenParserTokenRequest (response k l c)
-        response k l c x@(filename, (line, col), _) = test x (k (Syntax.Pos filename line col) l c)
+  where check k l c r = TokenParserTokenRequest (response k l c r)
+        response k l c r x@(filename, (line, col), _) = test x (k (Syntax.Pos filename line col) l c r)
         test x (TokenParserTokenRequest k) = k x
         test _ (TokenParserFinished x) = error "Compiler.TokenParser.position: impossible"
         test x (TokenParserError pos msg) = TokenParserError pos msg
+
+localEnv :: AmbiguousParser Env
+localEnv = AmbiguousParser f
+  where f k l c r = k r l c r
+
+withLocalEnv :: Env -> AmbiguousParser a -> AmbiguousParser a
+withLocalEnv r1 p = AmbiguousParser f
+  where f k l c r2 = runAmbiguousParser p (g k r2) l c r1
+        g k r2 x l c _ = k x l c r2
 
 isToken :: Token -> AmbiguousParser ()
 isToken tok1 = do
@@ -110,9 +154,9 @@ isToken tok1 = do
 
 eof :: AmbiguousParser ()
 eof = AmbiguousParser check
-  where check k l c = TokenParserTokenRequest (response k l c)
-        response k l c (filename, pos, Nothing)  = k () l c
-        response k l c (filename, pos, Just tok) = TokenParserError pos ""
+  where check k l c r = TokenParserTokenRequest (response k l c r)
+        response k l c r (filename, pos, Nothing)  = k () l c r
+        response k l c r (filename, pos, Just tok) = TokenParserError pos ""
 
 topLevelIndentation :: Int
 topLevelIndentation = 4
@@ -193,9 +237,10 @@ rightBracket = isToken RightBracketToken
 keyword :: String -> AmbiguousParser ()
 keyword s1 = do
   pos <- position
+  r <- localEnv
   x <- token
   case x of
-    LowerToken s2 | s1 == s2 -> return ()
+    LowerToken s2 | s1 == s2 && not (elem s1 (envVal r)) -> return ()
     _ -> failurePos pos
 
 funDec :: AmbiguousParser Syntax.Dec
@@ -211,15 +256,9 @@ funDec = do
   e3 <- many pat3
   colon
   e4 <- typ0
-  e5 <- withLocals (patsLocals e3) $
+  e5 <- withPatsLocals e3 $
           indented (c + 2) stm0
   return $ Syntax.FunDec pos e1 e2 e3 e4 e5
-
-withLocals :: [String] -> AmbiguousParser a -> AmbiguousParser a
-withLocals xs p = p
-
-patsLocals :: [Syntax.Pat] -> [String]
-patsLocals _ = return []
 
 stm0 :: AmbiguousParser Syntax.Term
 stm0 = do
@@ -235,7 +274,7 @@ bindStm = do
   p <- pat0
   keyword "to"
   t1 <- stm1
-  t2 <- indented c stm0
+  t2 <- withPatLocals p $ indented c stm0
   return $ Syntax.BindTerm Type.Unit p t1 t2
 
 seqStm :: AmbiguousParser Syntax.Term
@@ -264,7 +303,7 @@ rule :: AmbiguousParser (Syntax.Pat, Syntax.Term)
 rule = do
   Syntax.Pos _ _ c <- position
   p <- pat0
-  t <- indented (c + 2) stm0
+  t <- withPatLocals p $ indented (c + 2) stm0
   return (p, t)
 
 term0 :: AmbiguousParser Syntax.Term
@@ -301,7 +340,11 @@ applyTerm t1 = do
 exp3 :: AmbiguousParser Syntax.Term
 exp3 = choice [ do pos <- position
                    x <- lower
-                   return $ Syntax.VariableTerm pos x
+                   r <- localEnv
+                   if elem x (envVal r) then
+                     return $ Syntax.VariableTerm pos x
+                   else
+                     failurePosMsg pos $ "Unbound variable " ++ x ++ "."
               , do pos <- position
                    x <- qual
                    return $ Syntax.UpperTerm pos [] Type.Unit x
