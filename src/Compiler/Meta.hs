@@ -104,6 +104,17 @@ envLookupUnit r [s]   = lookup s (envUnits r)
 envLookupUnit r (s:q) = do r <- lookup s (envModules r)
                            envLookupUnit r q
 
+envStackLookupMod :: [Env] -> [String] -> Env
+envStackLookupMod [] q = error $ "envStackLookupMod: " ++ show q
+envStackLookupMod (r:rs) q = fromMaybe failure (envLookupMod r q)
+  where failure = envStackLookupMod rs q
+
+envLookupMod :: Env -> [String] -> Maybe Env
+envLookupMod r []    = error "envLookupMod"
+envLookupMod r [s]   = lookup s (envModules r)
+envLookupMod r (s:q) = do r <- lookup s (envModules r)
+                          envLookupMod r q
+
 
 gatherProgram :: Program -> Env
 gatherProgram (Program ds) = foldl (gatherDec [] []) builtinEnv ds
@@ -163,15 +174,12 @@ typeSubstitute q1 q2 ps (Type.Variant q tys)  = Type.Variant (fromMaybe q (f q1 
 -- Use the top level types to add type information.
 --------------------------------------------------------------------------------
 
-envStackLookupMod :: [Env] -> String -> Env
-envStackLookupMod rs s = error "eslm"
-
 convertProgram :: Env -> Program -> Program
 convertProgram r (Program ds) = Program (map (convertDec [r]) ds)
 
 convertDec :: [Env] -> Dec -> Dec
 convertDec rs (UnitDec pos s ss ds)     = UnitDec pos s ss (map (convertDec (snd (envStackLookupUnit rs [s]) : rs)) ds)
-convertDec rs (ModDec pos s ds)         = ModDec pos s (map (convertDec (envStackLookupMod rs s : rs)) ds)
+convertDec rs (ModDec pos s ds)         = ModDec pos s (map (convertDec (envStackLookupMod rs [s] : rs)) ds)
 convertDec rs (NewDec pos s q tys)      = NewDec pos s q tys
 convertDec rs (FunDec pos s ss ps ty t) = FunDec pos s ss ps ty (runM (convertTerm t) const rs 0)
 convertDec rs (SumDec pos s ss cs)      = SumDec pos s ss cs
@@ -294,4 +302,5 @@ convertType (ArrowTyp t1 t2)   = Type.Arrow (convertType t1) (convertType t2)
 convertType (LowerTyp s)       = Type.Variable s
 convertType (TupleTyp tys)     = Type.Tuple (map convertType tys)
 convertType (UnitTyp _)        = Type.Unit
+convertType (UpperTyp _ ["String"] _) = Type.String -- fix this
 convertType (UpperTyp _ q tys) = Type.Variant q (map convertType tys)

@@ -207,11 +207,9 @@ populateEnv = do
 
   d <- lookupFunction ["Continue"]
   d1 <- gen
-  d2 <- gen
   exportFunction d (Lambda.Function [] undefined
                      (Lambda.LambdaTerm d1 Lambda.StringType
-                       (Lambda.LambdaTerm d2 undefined
-                         (Lambda.ConstructorTerm undefined [] 1 [Lambda.VariableTerm d1, Lambda.VariableTerm d2]))))
+                       (Lambda.ConstructorTerm undefined [] 1 [Lambda.VariableTerm d1])))
 
   d <- lookupFunction ["Exit"]
   exportFunction d (Lambda.Function [] undefined (Lambda.ConstructorTerm undefined [] 0 []))

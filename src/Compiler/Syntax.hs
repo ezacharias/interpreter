@@ -70,4 +70,5 @@ typType (ArrowTyp ty1 ty2) = Type.Arrow (typType ty1) (typType ty2)
 typType (LowerTyp s)       = Type.Variable s
 typType (TupleTyp tys)     = Type.Tuple (map typType tys)
 typType (UnitTyp _)        = Type.Unit
+typType (UpperTyp _ ["String"] tys) = Type.String -- fix this
 typType (UpperTyp _ s tys) = Type.Variant s (map typType tys)

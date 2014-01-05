@@ -90,7 +90,7 @@ loop ns fs r = loop1 r
         loop2 (VariantValue d [])                 | d == exitIndex     = ExitStatus
         loop2 (VariantValue d [ClosureValue k])   | d == continueIndex = loop1 $ k UnitValue
         loop2 (VariantValue d [StringValue s, v]) | d == writeIndex    = WriteStatus s $ loop2 v
-        loop2 _ = error "Compiler.Interpreter.loop: impossible"
+        loop2 x = error $ "Compiler.Interpreter.loop: impossible " ++ show x
 
 
 withDynamicEnv :: [(TypeIdent, Type)] -> [(ValueIdent, Value)] -> Result a -> Result a
@@ -133,7 +133,7 @@ eval UnitTerm                   = Return UnitValue
 eval (UnreachableTerm _)        = error "Interpreter: Unreachable"
 eval (UntupleTerm ds e1 e2)     = do { v <- eval e1; bind ds (tupleValue v) e2 }
 eval (VariableTerm d)           = do r <- GetValueEnv
-                                     return $ maybe (error "interpreter variable term") id (lookup d r)
+                                     return $ maybe (error $ "interpreter variable term " ++ show d) id (lookup d r)
 
 bind :: [ValueIdent] -> [Value] -> Term -> Result Value
 bind ds vs e = do xs <- GetTypeEnv
@@ -148,7 +148,9 @@ evalCatchTerm :: TagIdent -> Result Value -> ValueIdent -> ValueIdent -> Term ->
 evalCatchTerm tag1 r d1 d2 e = check r
   where check (Return x)               = Return x
         check (Bind (Escape tag2 v) k)
-                        | tag1 == tag2 = bind [d1, d2] [v, ClosureValue (check . k)] e
+                        | tag1 == tag2 = do xs <- GetTypeEnv
+                                            ys <- GetValueEnv
+                                            bind [d1, d2] [v, ClosureValue (withDynamicEnv xs ys . check . k)] e
         check (Bind m k)               = Bind m (check . k)
         check m                        = check $ Bind m Return
 

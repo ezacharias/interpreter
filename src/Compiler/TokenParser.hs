@@ -168,7 +168,7 @@ program = do
   return $ Syntax.Program xs
 
 dec :: AmbiguousParser Syntax.Dec
-dec = funDec <|> sumDec <|> newDec <|> unitDec
+dec = funDec <|> sumDec <|> newDec <|> unitDec <|> modDec
 
 upper :: AmbiguousParser String
 upper = do

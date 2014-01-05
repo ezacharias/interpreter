@@ -1,11 +1,5 @@
--- Throw(tag : Tag⟦a, b⟧)(x : a) : b
--- Catch(tag : Tag⟦a, b⟧, f : () ⟶ c)(g : a ⟶ (b ⟶ c) ⟶ c) : c
--- Unreachable : a
--- Exit : Output
-
-
--- This is a comment. As you can see, we generally use whitespace and nothing else.
--- It makes programs very clear and easy to understand.
+This is a comment. As you can see, we generally use whitespace and nothing else.
+It makes programs very clear and easy to understand.
 
 
     unit Getter⟦t⟧
@@ -28,14 +22,36 @@
       True
 
 
--- A text line starts at column 1. It proceeds until there are two empty lines.
--- This means you can be fairly freeform with paragraphs without causing
--- interference with code.
+The IO module provides a mechanism to write strings.
+
+
+    mod IO
+
+      new R = Escape⟦String, ()⟧
+
+      With(f : () ⟶ Output) : Output
+        R.Catch(f)(C)
+
+      C(x : String)(f : () ⟶ Output) : Output
+        Write(x)(Continue(f))
+
+      Put(x : String) : ()
+        R.Throw(x)
+
+
+A text line starts at column 1. It proceeds until there are two empty lines.
+This means you can be fairly freeform with paragraphs without causing
+interference with code.
 
 
     Main : Output
-      Write("Hello")(Exit)
-      -- G.With()(F)
+      IO.With(L)
+
+    L() : Output
+      IO.Put("A")
+      IO.Put("B")
+      IO.Put("C")
+      Exit
 
     F() : Output
       G.Get
@@ -50,15 +66,9 @@
     Constant⟦a, b⟧(x : a)(y : b) : a
       x
 
+ -- Comments are usually written with a double dash in the gutter, so it is
+ -- easy to see comment markers.
 
--- Code is commonly commented out using a different syntax than text comments.
--- These are usually gutter comments, which don't indent the code at all.
-
-
---   - Text comments use a single dash in the gutter. Code comments use a
---   - greater-than sign. To allow a text editor to syntax-color them.
-
---   > sum List⟦a⟧
---   >   Nil
---   >   Cons(a, List⟦a⟧)
-
+ -- sum List⟦a⟧
+ --   Nil
+ --   Cons(a, List⟦a⟧)
