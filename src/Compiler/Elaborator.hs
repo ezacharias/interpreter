@@ -312,7 +312,7 @@ convertCurried (p:ps) t = do
 convertPat :: Int -> Syntax.Pat -> M a -> M a
 convertPat d p m =
   case p of
-    Syntax.AscribePat p ty ->
+    Syntax.AscribePat _ p ty ->
       convertPat d p m
     Syntax.LowerPat _ s ->
       withValueRename s d m
@@ -393,9 +393,9 @@ convertCurriedPatterns (p:ps) ty2 = do ty1 <- patternType p
 --         | UpperPat Pos [Type.Type] Type.Type Qual [Pat]
 
 patternType :: Syntax.Pat -> M Lambda.Type
-patternType (Syntax.AscribePat _ ty)    = convertType ty
+patternType (Syntax.AscribePat _ _ ty)  = convertType ty
 patternType (Syntax.LowerPat _ _)       = error "impossible"
-patternType (Syntax.TuplePat _ ps)      = do tys <- mapM patternType ps
+patternType (Syntax.TuplePat _ _ ps)    = do tys <- mapM patternType ps
                                              return $ Lambda.TupleType tys
 patternType Syntax.UnderbarPat          = error "impossible"
 patternType (Syntax.UnitPat _)          = return Lambda.UnitType

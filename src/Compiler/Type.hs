@@ -7,7 +7,7 @@ type Metavariable = Int
 data Type = Arrow Type Type
           | Metavariable Metavariable
           | String
-          | Tuple [Type]
+          | Tuple { tupleElems :: [Type] }
           | Unit
           | Variable String
           | Variant [String] [Type]

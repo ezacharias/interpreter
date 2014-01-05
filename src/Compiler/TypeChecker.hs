@@ -13,9 +13,6 @@ about how to do that.
 -}
 
 
--- Use functors for Either.
-
-
 module Compiler.TypeChecker where
 
 import           Control.Monad   (MonadPlus, mzero)
@@ -34,9 +31,7 @@ import qualified Compiler.Type   as Type
 inferProgram :: Syntax.Program -> Either String Syntax.Program
 
 inferProgram (Syntax.Program xs) =
-  case mapM inferDec xs of
-    Left msg -> Left msg
-    Right xs -> Right $ Syntax.Program xs
+  fmap Syntax.Program (mapM inferDec xs)
 
 
 inferDec :: Syntax.Dec -> Either String Syntax.Dec
@@ -76,22 +71,10 @@ inferDecs (d:ds) =
         Right ds -> Right (d:ds)
 
 
-
--- Do I just want to add the metavariable?
-
 gammaWithPat :: Gamma -> Sigma -> Syntax.Pat -> Type.Type -> Either String Gamma
-
-gammaWithPat g s (Syntax.AscribePat p _)        ty = gammaWithPat g s p ty
-gammaWithPat g s (Syntax.LowerPat pos n)        ty =
-  if isConcreteType ty'
-    then Right $ gammaBind g n ty'
-    else Left $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Variable bindings must have concrete types. Given " ++ fst (showType [] (updateType s ty')) ++ "."
-  where ty' = updateType s ty
-        (m, _) = showType [] ty'
-        Syntax.Pos filename line col = pos
-gammaWithPat g s (Syntax.TuplePat _ ps)         ty = case ty of
-                                                     Type.Tuple tys -> gammaWithPats g s ps tys
-                                                     _ -> error "impossible"
+gammaWithPat g s (Syntax.AscribePat _ p _)      ty = gammaWithPat g s p ty
+gammaWithPat g s (Syntax.LowerPat pos n)        ty = gammaWithLowerPat g s pos n ty
+gammaWithPat g s (Syntax.TuplePat _ _ ps)       ty = gammaWithPats g s ps (Type.tupleElems ty)
 gammaWithPat g s Syntax.UnderbarPat             ty = Right g
 gammaWithPat g s (Syntax.UnitPat _)             ty = Right g
 gammaWithPat g s (Syntax.UpperPat _ tys _ _ ps) ty = gammaWithPats g s ps tys
@@ -104,6 +87,16 @@ gammaWithPats g s (p:ps) (ty:tys) = case gammaWithPat g s p ty of
                                       Left msg -> Left msg
                                       Right g -> gammaWithPats g s ps tys
 gammaWithPats g s _      _        = error "Compiler.TypeChecker.withPats: impossible"
+
+
+gammaWithLowerPat :: Gamma -> Sigma -> Syntax.Pos -> String -> Type.Type -> Either String Gamma
+gammaWithLowerPat g s pos n ty =
+  if isConcreteType ty'
+    then Right $ gammaBind g n ty'
+    else Left $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Variable bindings must have concrete types. Given " ++ fst (showType [] (updateType s ty')) ++ "."
+  where ty' = updateType s ty
+        (m, _) = showType [] ty'
+        Syntax.Pos filename line col = pos
 
 
 -- The first thing we do is run typeCheckTerm, which gets us the table of
@@ -119,7 +112,6 @@ inferTerm g s ty t = do s <- typeCheckTerm g s ty t
 -- Replaces all metavariables in the term with concrete types.
 
 concreteTerm :: Sigma -> Syntax.Term -> Syntax.Term
-
 concreteTerm s (Syntax.ApplyTerm m t1 t2)   = Syntax.ApplyTerm (concreteType s m) (concreteTerm s t1) (concreteTerm s t2)
 concreteTerm s (Syntax.AscribeTerm p t ty)  = Syntax.AscribeTerm p (concreteTerm s t) ty
 concreteTerm s (Syntax.BindTerm m p t1 t2)  = Syntax.BindTerm (concreteType s m) p (concreteTerm s t1) (concreteTerm s t2)
@@ -177,52 +169,46 @@ updateType s (Type.Variable x)     = Type.Variable x
 updateType s (Type.Variant x ts)   = Type.Variant x (map (updateType s) ts)
 
 
-typeCheckPat :: Sigma -> Type.Type -> Syntax.Pat -> Either String (Type.Type, Sigma)
+typeCheckPat :: Sigma -> Type.Type -> Syntax.Pat -> Either String Sigma
 
-typeCheckPat s ty (Syntax.AscribePat p ty2) =
+typeCheckPat s ty (Syntax.AscribePat pos p ty2) =
   case unify s ty (Syntax.typType ty2) of
-    Nothing -> Left undefined -- $ show ty ++ " " ++ show (Syntax.typType ty2)
+    Nothing -> errorMsg s pos ty (Syntax.typType ty2)
     Just (ty, s) -> typeCheckPat s ty p
 
-typeCheckPat s ty (Syntax.LowerPat _ x) = Right (ty, s)
+typeCheckPat s ty (Syntax.LowerPat _ x) = Right s
 
-typeCheckPat s ty (Syntax.TuplePat tys ps) =
+typeCheckPat s ty (Syntax.TuplePat pos tys ps) =
   case unify s ty (Type.Tuple tys) of
-    Nothing -> Left undefined
+    Nothing -> errorMsg s pos ty (Type.Tuple tys)
     Just (Type.Tuple tys, s) ->
       case typeCheckPats s tys ps of
         Left msg -> Left msg
-        Right (tys, s) -> Right (Type.Tuple tys, s)
+        Right s -> Right s
     Just (_, s) -> unreachable
 
 typeCheckPat s ty Syntax.UnderbarPat =
-  Right (ty, s)
+  Right s
 
-typeCheckPat s ty (Syntax.UnitPat _) =
+typeCheckPat s ty (Syntax.UnitPat pos) =
   case unify s ty Type.Unit of
-    Nothing -> Left undefined
-    Just (ty, s) -> Right (ty, s)
+    Nothing -> errorMsg s pos ty Type.Unit
+    Just (ty, s) -> Right s
 
 typeCheckPat s ty (Syntax.UpperPat pos tys ty2 x ps) =
   case unify s ty ty2 of
     Nothing -> errorMsg s pos ty ty2
-    Just (ty, s) ->
-      case typeCheckPats s tys ps of
-        Left msg -> Left msg
-        Right (tys, s) -> Right (ty, s)
+    Just (ty, s) -> fmap (const s) (typeCheckPats s tys ps)
 
 
-typeCheckPats :: Sigma -> [Type.Type] -> [Syntax.Pat] -> Either String ([Type.Type], Sigma)
+typeCheckPats :: Sigma -> [Type.Type] -> [Syntax.Pat] -> Either String Sigma
 
-typeCheckPats s [] [] = Right ([], s)
+typeCheckPats s [] [] = Right s
 
 typeCheckPats s (ty:tys) (p:ps) =
   case typeCheckPat s ty p of
     Left msg -> Left msg
-    Right (ty, s) ->
-      case typeCheckPats s tys ps of
-        Left msg -> Left msg
-        Right (tys, s) -> Right (ty:tys, s)
+    Right s -> typeCheckPats s tys ps
 
 typeCheckPats s _ _ = unreachable
 
@@ -245,7 +231,7 @@ typeCheckTerm g s ty (Syntax.AscribeTerm p t ty2) =
 typeCheckTerm g s ty (Syntax.BindTerm tyP p t1 t2) =
   case typeCheckPat s tyP p of
     Left msg -> Left msg
-    Right (tyP, s) ->
+    Right s ->
       case typeCheckTerm g s tyP t1 of
         Left msg -> Left msg
         Right s ->
@@ -264,7 +250,7 @@ typeCheckTerm g s ty (Syntax.CaseTerm ty2 t rs) =
         typeCheckRulePats s ty ((p, _) : rs) =
           case typeCheckPat s ty p of
             Left msg -> Left msg
-            Right (ty, s) -> typeCheckRulePats s ty rs
+            Right s -> typeCheckRulePats s ty rs
         typeCheckRules g s ty1 ty2 [] = Right s
         typeCheckRules g s ty1 ty2 (r:rs) =
           case typeCheckRule g s ty1 ty2 r of
@@ -381,7 +367,7 @@ showQual :: [String] -> String
 showQual = concat . intersperse "."
 
 
--- Attempts to unify two types, returning the new type. To equal concrete types
+-- Attempts to unify two types, returning the new type. Two equal concrete types
 -- will unify. A concrete type and a metavariable will record the concrete type
 -- in sigma as a constraint.
 

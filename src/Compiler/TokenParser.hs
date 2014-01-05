@@ -3,12 +3,14 @@ module Compiler.TokenParser
   , tokenParser
   ) where
 
-import Control.Applicative (Applicative, pure, (<*>), Alternative, empty, (<|>))
+import           Control.Applicative (Alternative, Applicative, empty, many,
+                                      pure, some, (<*>), (<|>))
 import           Control.Monad
+import           Data.Foldable       (asum)
 
-import qualified Compiler.Syntax as Syntax
+import qualified Compiler.Syntax     as Syntax
 import           Compiler.Token
-import qualified Compiler.Type as Type
+import qualified Compiler.Type       as Type
 
 -- | A token parser is a data structure which is incrementally fed tokens and returns the result.
 data TokenParser a = TokenParserFinished a
@@ -28,9 +30,9 @@ envWith :: Env -> [String] -> Env
 envWith (Env ss1) ss2 = Env (ss2 ++ ss1)
 
 patLocals :: Syntax.Pat -> [String]
-patLocals (Syntax.AscribePat p _)      = patLocals p
+patLocals (Syntax.AscribePat _ p _)    = patLocals p
 patLocals (Syntax.LowerPat _ s)        = [s]
-patLocals (Syntax.TuplePat _ ps)       = concat (map patLocals ps)
+patLocals (Syntax.TuplePat _ _ ps)     = concat (map patLocals ps)
 patLocals Syntax.UnderbarPat           = []
 patLocals (Syntax.UnitPat _)           = []
 patLocals (Syntax.UpperPat _ _ _ _ ps) = concat (map patLocals ps)
@@ -97,15 +99,7 @@ alt p1 p2 = AmbiguousParser (\ k l c r -> check (runAmbiguousParser p1 k l c r) 
         check (TokenParserError pos1 msg1) (TokenParserError pos2 msg2) = TokenParserError pos2 msg2
 
 choice :: [AmbiguousParser a] -> AmbiguousParser a
-choice = foldr alt failure
-
-many :: AmbiguousParser a -> AmbiguousParser [a]
-many p = choice [ liftM2 (:) p (many p)
-                , return []
-                ]
-
-some :: AmbiguousParser a -> AmbiguousParser [a]
-some p = liftM2 (:) p (many p)
+choice = asum
 
 -- | The first token matched must be at the given column number.
 indented :: Int -> AmbiguousParser a -> AmbiguousParser a
@@ -261,11 +255,7 @@ funDec = do
   return $ Syntax.FunDec pos e1 e2 e3 e4 e5
 
 stm0 :: AmbiguousParser Syntax.Term
-stm0 = do
-  choice [ bindStm
-         , seqStm
-         , stm1
-         ]
+stm0 = bindStm <|> seqStm <|> stm1
 
 bindStm :: AmbiguousParser Syntax.Term
 bindStm = do
@@ -286,10 +276,7 @@ seqStm = do
     return $ Syntax.SeqTerm t1 t2
 
 stm1 :: AmbiguousParser Syntax.Term
-stm1 =
-  choice [ caseStm
-         , term0
-         ]
+stm1 = caseStm <|> term0
 
 caseStm :: AmbiguousParser Syntax.Term
 caseStm = do
@@ -375,9 +362,10 @@ exp4 = do
 pat0 :: AmbiguousParser Syntax.Pat
 pat0 = do
   p <- pat1
-  choice [ do colon
+  choice [ do pos <- position
+              colon
               ty <- typ0
-              return $ Syntax.AscribePat p ty
+              return $ Syntax.AscribePat pos p ty
          , return p
          ]
 
@@ -412,11 +400,12 @@ pat3 =
               leftParen
               rightParen
               return $ Syntax.UnitPat pos
-         , do leftParen
+         , do pos <- position
+              leftParen
               p <- pat0
               ps <- some $ comma >> pat0
               rightParen
-              return $ Syntax.TuplePat (map (\ _ -> Type.Unit) (p:ps)) (p:ps)
+              return $ Syntax.TuplePat pos (map (\ _ -> Type.Unit) (p:ps)) (p:ps)
          , do leftParen
               p <- pat0
               rightParen
@@ -537,6 +526,3 @@ unitDec = do
                ]
   e3 <- many $ indented (c + 2) dec
   return $ Syntax.UnitDec pos e1 e2 e3
-
-undefinedFailure :: AmbiguousParser a
-undefinedFailure = failure

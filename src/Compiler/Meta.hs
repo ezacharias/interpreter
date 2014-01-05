@@ -275,15 +275,15 @@ convertRule (p, t) = do
 convertPat :: Pat -> M Pat
 convertPat p =
   case p of
-    AscribePat p ty -> do
+    AscribePat pos p ty -> do
       p' <- convertPat p
-      return $ AscribePat p' ty
+      return $ AscribePat pos p' ty
     LowerPat pos s ->
       return $ LowerPat pos s
-    TuplePat _ ps -> do
+    TuplePat pos _ ps -> do
       m <- mapM gen1 ps
       ps' <- mapM convertPat ps
-      return $ TuplePat m ps'
+      return $ TuplePat pos m ps'
     UnderbarPat ->
       return UnderbarPat
     UnitPat pos ->
