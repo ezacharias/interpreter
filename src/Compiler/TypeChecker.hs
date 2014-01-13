@@ -112,16 +112,17 @@ inferTerm g s ty t = do s <- typeCheckTerm g s ty t
 -- Replaces all metavariables in the term with concrete types.
 
 concreteTerm :: Sigma -> Syntax.Term -> Syntax.Term
-concreteTerm s (Syntax.ApplyTerm m t1 t2)   = Syntax.ApplyTerm (concreteType s m) (concreteTerm s t1) (concreteTerm s t2)
-concreteTerm s (Syntax.AscribeTerm p t ty)  = Syntax.AscribeTerm p (concreteTerm s t) ty
-concreteTerm s (Syntax.BindTerm m p t1 t2)  = Syntax.BindTerm (concreteType s m) p (concreteTerm s t1) (concreteTerm s t2)
-concreteTerm s (Syntax.CaseTerm m t rs)     = Syntax.CaseTerm (concreteType s m) (concreteTerm s t) (map (concreteRule s) rs)
-concreteTerm s (Syntax.VariableTerm p x)    = Syntax.VariableTerm p x
-concreteTerm s (Syntax.SeqTerm t1 t2)       = Syntax.SeqTerm (concreteTerm s t1) (concreteTerm s t2)
-concreteTerm s (Syntax.StringTerm p x)      = Syntax.StringTerm p x
-concreteTerm s (Syntax.TupleTerm p ms xs)   = Syntax.TupleTerm p (map (concreteType s) ms) (map (concreteTerm s) xs)
-concreteTerm s (Syntax.UnitTerm p)          = Syntax.UnitTerm p
-concreteTerm s (Syntax.UpperTerm p ts ty x) = Syntax.UpperTerm p (map (concreteType s) ts) (concreteType s ty) x
+concreteTerm s (Syntax.ApplyTerm m t1 t2)       = Syntax.ApplyTerm (concreteType s m) (concreteTerm s t1) (concreteTerm s t2)
+concreteTerm s (Syntax.AscribeTerm p t ty)      = Syntax.AscribeTerm p (concreteTerm s t) ty
+concreteTerm s (Syntax.BindTerm m p t1 t2)      = Syntax.BindTerm (concreteType s m) p (concreteTerm s t1) (concreteTerm s t2)
+concreteTerm s (Syntax.CaseTerm m t rs)         = Syntax.CaseTerm (concreteType s m) (concreteTerm s t) (map (concreteRule s) rs)
+concreteTerm s (Syntax.ForTerm m1s m2 ps t1 t2) = Syntax.ForTerm (map (concreteType s) m1s) (concreteType s m2) ps (concreteTerm s t1) (concreteTerm s t2)
+concreteTerm s (Syntax.VariableTerm p x)        = Syntax.VariableTerm p x
+concreteTerm s (Syntax.SeqTerm t1 t2)           = Syntax.SeqTerm (concreteTerm s t1) (concreteTerm s t2)
+concreteTerm s (Syntax.StringTerm p x)          = Syntax.StringTerm p x
+concreteTerm s (Syntax.TupleTerm p ms xs)       = Syntax.TupleTerm p (map (concreteType s) ms) (map (concreteTerm s) xs)
+concreteTerm s (Syntax.UnitTerm p)              = Syntax.UnitTerm p
+concreteTerm s (Syntax.UpperTerm p ts ty x)     = Syntax.UpperTerm p (map (concreteType s) ts) (concreteType s ty) x
 
 
 concreteRule :: Sigma -> (Syntax.Pat, Syntax.Term) -> (Syntax.Pat, Syntax.Term)
@@ -238,6 +239,17 @@ typeCheckTerm g s ty (Syntax.BindTerm tyP p t1 t2) =
           case gammaWithPat g s p tyP of
             Left msg -> Left msg
             Right g -> typeCheckTerm g s ty t2
+
+typeCheckTerm g s ty (Syntax.ForTerm tyPs ty2 ps t1 t2) =
+  case maybe (Right s) (typeCheckPats s tyPs) ps of
+    Left msg -> Left msg
+    Right s ->
+      case typeCheckTerm g s (Type.Arrow (foldr Type.Arrow ty2 tyPs) ty) t1 of
+        Left msg -> Left msg
+        Right s ->
+          case maybe (Right g) (\ ps -> gammaWithPats g s ps tyPs) ps of
+            Left msg -> Left msg
+            Right g -> typeCheckTerm g s ty2 t2
 
 typeCheckTerm g s ty (Syntax.CaseTerm ty2 t rs) =
   case typeCheckRulePats s ty2 rs of

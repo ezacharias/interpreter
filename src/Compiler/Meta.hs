@@ -123,7 +123,7 @@ gatherDec :: [String] -> [Env] -> Env -> Dec -> Env
 gatherDec l rs r (FunDec _ s ss ps ty _) = envWithFunction r s (ss, funType ps ty)
 gatherDec l rs r (ModDec _ s ds)         = envWithModule r s $ foldl (gatherDec (s:l) (r:rs)) emptyEnv ds
 gatherDec l rs r (NewDec _ s q tys)      = envWithModule r s $ unitApply q (s:l) (envStackLookupUnit (r:rs) q) (map convertType tys)
-gatherDec l rs r (SumDec _ s ss cs)      = foldl (gatherConstructor (s:l) ss) r cs
+gatherDec l rs r (SumDec _ s ss cs)      = foldl (gatherConstructor (reverse (s:l)) ss) r cs
 gatherDec l rs r (UnitDec _ s ss ds)     = envWithUnit r s (ss, foldl (gatherDec (s:l) (r:rs)) emptyEnv ds)
 
 gatherConstructor :: [String] -> [String] -> Env -> (Pos, String, [Typ]) -> Env
@@ -246,6 +246,17 @@ convertTerm t =
       t' <- convertTerm t
       rs' <- mapM convertRule rs
       return $ CaseTerm m t' rs'
+    ForTerm m1s m2 ps t1 t2 -> do
+      m2' <- gen
+      t1' <- convertTerm t1
+      t2' <- convertTerm t2
+      case ps of
+        Nothing ->
+          return $ ForTerm m1s m2' Nothing t1' t2'
+        Just ps -> do
+          m1s' <- mapM (const gen) ps
+          ps' <- mapM convertPat ps
+          return $ ForTerm m1s' m2' (Just ps') t1' t2'
     SeqTerm t1 t2 -> do
       t1' <- convertTerm t1
       t2' <- convertTerm t2

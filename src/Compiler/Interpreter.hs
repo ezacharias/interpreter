@@ -186,19 +186,19 @@ evalShowValue t v = do s <- showValue t v
                                                         s1 <- return (ss !! d2)
                                                         s2 <- zipWithM parens ts vs
                                                         Return (s1 ++ concat s2)
-        showVariantValue _ _ _ = error "impossible"
+        showVariantValue _ _ _ = error "impossible 1"
         showTagValue _ d = do LookupTag d
         showTupleValue (TupleType (t:ts)) (v:vs) = do s1 <- showValue t v
                                                       s2 <- commas ts vs
                                                       return $ "(" ++ s1 ++ s2
-        showTupleValue _ _ = error "impossible"
+        showTupleValue _ _ = error "impossible 2"
         parens t v = do s <- showValue t v
                         return $ "(" ++ s ++ ")"
         commas [] [] = return ")"
         commas (t:ts) (v:vs) = do s1 <- showValue t v
                                   s2 <- commas ts vs
                                   return $ ", " ++ s1 ++ s2
-        commas _ _ = error "impossible"
+        commas _ _ = error "impossible 3"
 
 evalType :: Type -> Result Type
 evalType (ArrowType t1 t2) = do t1' <- evalType t1

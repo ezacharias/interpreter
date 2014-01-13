@@ -3,7 +3,7 @@ module Compiler.TokenParser
   , tokenParser
   ) where
 
-import           Control.Applicative (Alternative, Applicative, empty, many,
+import           Control.Applicative (Alternative, Applicative, empty, many, optional,
                                       pure, some, (<*>), (<|>))
 import           Control.Monad
 import           Data.Foldable       (asum)
@@ -255,7 +255,9 @@ funDec = do
   return $ Syntax.FunDec pos e1 e2 e3 e4 e5
 
 stm0 :: AmbiguousParser Syntax.Term
-stm0 = bindStm <|> seqStm <|> stm1
+stm0 = do
+  Syntax.Pos _ _ c <- position
+  (bindStm <|> seqStm <|> stm1 c)
 
 bindStm :: AmbiguousParser Syntax.Term
 bindStm = do
@@ -263,24 +265,23 @@ bindStm = do
   keyword "bind"
   p <- pat0
   keyword "to"
-  t1 <- stm1
+  t1 <- stm1 c
   t2 <- withPatLocals p $ indented c stm0
   return $ Syntax.BindTerm Type.Unit p t1 t2
 
 seqStm :: AmbiguousParser Syntax.Term
 seqStm = do
   Syntax.Pos _ _ c <- position
-  t1 <- stm1
+  t1 <- stm1 c
   indented c $ do
     t2 <- stm0
     return $ Syntax.SeqTerm t1 t2
 
-stm1 :: AmbiguousParser Syntax.Term
-stm1 = caseStm <|> term0
+stm1 :: Int -> AmbiguousParser Syntax.Term
+stm1 c = caseStm c  <|> forStm c <|> term0
 
-caseStm :: AmbiguousParser Syntax.Term
-caseStm = do
-  Syntax.Pos _ _ c <- position
+caseStm :: Int -> AmbiguousParser Syntax.Term
+caseStm c = do
   keyword "case"
   t <- term2
   rs <- some $ indented (c + 2) rule
@@ -292,6 +293,17 @@ rule = do
   p <- pat0
   t <- withPatLocals p $ indented (c + 2) stm0
   return (p, t)
+
+forStm :: Int -> AmbiguousParser Syntax.Term
+forStm c = do
+  x1 <- optional $ do
+    keyword "for"
+    many pat3
+  x2 <- do
+    keyword "in"
+    term2
+  x3 <- withPatsLocals (maybe [] id x1) (indented (c + 2) stm0)
+  return $ Syntax.ForTerm [Type.Unit] Type.Unit x1 x2 x3
 
 term0 :: AmbiguousParser Syntax.Term
 term0 = do
@@ -416,7 +428,7 @@ typ0 :: AmbiguousParser Syntax.Typ
 typ0 = do
   ty <- typ1
   tys <- many $ rightArrow >> typ1
-  return $ foldl Syntax.ArrowTyp ty tys
+  return $ foldr1 Syntax.ArrowTyp (ty:tys)
 
 typ1 :: AmbiguousParser Syntax.Typ
 typ1 = do

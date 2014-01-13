@@ -306,16 +306,23 @@ convertCurried []     t = convertTerm t
 convertCurried (p:ps) t = do
   d  <- gen
   t  <- convertPat d p (convertCurried ps t)
-  ty <- patternType p
+  ty <- return undefined -- patternType p
   return $ Lambda.LambdaTerm d ty t
 
-convertPat :: Int -> Syntax.Pat -> M a -> M a
+convertPat :: Int -> Syntax.Pat -> M Lambda.Term -> M Lambda.Term
 convertPat d p m =
   case p of
     Syntax.AscribePat _ p ty ->
       convertPat d p m
     Syntax.LowerPat _ s ->
       withValueRename s d m
+    Syntax.TuplePat _ _ [p1, p2] -> do
+      d1 <- gen
+      d2 <- gen
+      t <- convertPat d1 p1 (convertPat d2 p2 m)
+      return $ Lambda.UntupleTerm [d1, d2] (Lambda.VariableTerm d) t
+    Syntax.UnderbarPat ->
+      m
     Syntax.UnitPat _ ->
       m
     p -> error $ "cp: " ++ show p
@@ -332,6 +339,11 @@ convertTerm t =
       t1 <- convertTerm t1
       t2 <- convertPat d p $ convertTerm t2
       return $ Lambda.BindTerm d t1 t2
+    Syntax.CaseTerm _ t1 rs -> do
+      d <- gen
+      t1 <- convertTerm t1
+      t2 <- convertRules d rs
+      return $ Lambda.BindTerm d t1 t2
     Syntax.SeqTerm t1 t2 -> do
       d  <- gen
       t1 <- convertTerm t1
@@ -339,6 +351,10 @@ convertTerm t =
       return $ Lambda.BindTerm d t1 t2
     Syntax.StringTerm _ x ->
       return $ Lambda.StringTerm x
+    Syntax.TupleTerm _ _ [t1, t2] -> do
+      t1 <- convertTerm t1
+      t2 <- convertTerm t2
+      return $ Lambda.TupleTerm [t1, t2]
     Syntax.UnitTerm _ ->
       return Lambda.UnitTerm
     Syntax.UpperTerm _ tys _ q -> do
@@ -348,10 +364,42 @@ convertTerm t =
     Syntax.VariableTerm _ s -> do
       d <- lookupValueRename s
       return $ Lambda.VariableTerm d
+    Syntax.ForTerm _ _ ps t1 t2 ->
+      case ps of
+        Nothing -> do
+          d <- gen
+          t1 <- convertTerm t1
+          t2 <- convertTerm t2
+          return $ Lambda.ApplyTerm t1 (Lambda.LambdaTerm d Lambda.UnitType t2)
+        Just ps -> do
+          t1 <- convertTerm t1
+          t2 <- convertCurried ps t2
+          return $ Lambda.ApplyTerm t1 t2
     _ -> error $ "ct: " ++ show t
 
+convertRule :: Int -> Syntax.Rule -> Lambda.Term -> M Lambda.Term
+convertRule d (Syntax.LowerPat _ x, t1)         t2 = withValueRename x d (convertTerm t1)
+convertRule d (Syntax.UnitPat _, t1)            t2 = convertTerm t1
+convertRule d (Syntax.UpperPat _ _ _ q [], t1)  t2 = do i <- lookupConstructor q
+                                                        t1 <- convertTerm t1
+                                                        return $ Lambda.TestTerm (Lambda.VariableTerm d) i [] t1 t2
+convertRule d (Syntax.UpperPat _ _ _ q [p], t1) t2 = do i <- lookupConstructor q
+                                                        d2 <- gen
+                                                        t1 <- convertRule d2 (p, t1) t2
+                                                        return $ Lambda.TestTerm (Lambda.VariableTerm d) i [d2] t1 t2
+convertRule d _ _ = error "Compiler.Elaborator.convertRule"
 
+
+--          | TestTerm Term ConstructorIndex [ValueIdent] Term Term
 -- This must export both the variant type and the constructor functions.
+
+convertRules :: Int -> [Syntax.Rule] -> M Lambda.Term
+convertRules d []     = return $ Lambda.UnreachableTerm undefined
+convertRules d (r:rs) = do d1 <- gen
+                           d2 <- gen
+                           t1 <- convertRule d r (Lambda.ApplyTerm (Lambda.VariableTerm d1) Lambda.UnitTerm)
+                           t2 <- convertRules d rs
+                           return $ Lambda.BindTerm d1 (Lambda.LambdaTerm d2 Lambda.UnitType t2) t1
 
 convertSumDec :: String -> [String] -> [(Syntax.Pos, String, [Syntax.Typ])] -> M ()
 convertSumDec s ss cs = do

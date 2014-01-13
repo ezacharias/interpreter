@@ -19,6 +19,7 @@ data Term = ApplyTerm Type.Type Term Term
           | AscribeTerm Pos Term Typ
           | BindTerm Type.Type Pat Term Term
           | CaseTerm Type.Type Term [Rule]
+          | ForTerm [Type.Type] Type.Type (Maybe [Pat]) Term Term
           | SeqTerm Term Term
           | StringTerm Pos String
           | TupleTerm Pos [Type.Type] [Term]
