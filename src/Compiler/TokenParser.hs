@@ -162,7 +162,7 @@ program = do
   return $ Syntax.Program xs
 
 dec :: AmbiguousParser Syntax.Dec
-dec = funDec <|> sumDec <|> newDec <|> unitDec <|> modDec
+dec = funDec <|> sumDec <|> newDec <|> unitDec <|> modDec <|> subDec
 
 upper :: AmbiguousParser String
 upper = do
@@ -509,6 +509,15 @@ modDec = do
   e1 <- upper
   e2 <- many $ indented (c + 2) dec
   return $ Syntax.ModDec pos e1 e2
+
+subDec :: AmbiguousParser Syntax.Dec
+subDec = do
+  pos@(Syntax.Pos _ _ c) <- position
+  keyword "sub"
+  e1 <- upper
+  isToken RightCapArrowToken
+  e2 <- qual
+  return $ Syntax.SubDec pos e1 e2
 
 newDec :: AmbiguousParser Syntax.Dec
 newDec = do

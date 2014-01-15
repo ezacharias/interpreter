@@ -94,6 +94,7 @@ tok pos = TokenizerCharRequest check
         test '⟧'  = TokenizerToken pos RightBracketToken (tok (colSucc pos))
         test ','  = TokenizerToken pos CommaToken (tok (colSucc pos))
         test '⟶'  = TokenizerToken pos RightArrowToken (tok (colSucc pos))
+        test '↦' = TokenizerToken pos RightCapArrowToken (tok (colSucc pos))
         test '_'  = TokenizerToken pos UnderbarToken (tok (colSucc pos))
         test '∘'  = TokenizerToken pos ComposeToken (tok (colSucc pos))
         test '!'  = TokenizerToken pos BangToken (tok (colSucc pos))

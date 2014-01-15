@@ -59,6 +59,9 @@ inferDec (Syntax.UnitDec pos s tys ds) =
     Left msg -> Left msg
     Right ds -> Right $ Syntax.UnitDec pos s tys ds
 
+inferDec (Syntax.SubDec pos x1 x2) =
+  Right $ Syntax.SubDec pos x1 x2
+
 
 inferDecs :: [Syntax.Dec] -> Either String [Syntax.Dec]
 inferDecs [] = Right []

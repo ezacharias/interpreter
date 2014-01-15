@@ -11,6 +11,7 @@ type Qual = [Name]
 data Dec = FunDec Pos String [String] [Pat] Typ Term
          | ModDec Pos String [Dec]
          | NewDec Pos String Qual [Typ]
+         | SubDec Pos String Qual
          | SumDec Pos String [String] [(Pos, String, [Typ])]
          | UnitDec Pos String [String] [Dec]
            deriving (Eq, Show)

@@ -16,7 +16,7 @@ addMetavariables p = convertProgram (gatherProgram p) p
 
 data Env = Env
              { envUnits        :: [(String, ([String], Env))]
-             , envModules      :: [(String, Env)]
+             , envModules      :: [(String, Either [String] Env)]
              , envFunctions    :: [(String, ([String], Type.Type))]
              , envConstructors :: [(String, ([String], [Type.Type], Type.Type))]
              }
@@ -50,7 +50,10 @@ builtinEnv = Env [ ( "Escape"
                      )
                    )
                  ]
-                 []
+                 [ ( "Root"
+                   , Left []
+                   )
+                 ]
                  [ ( "Concatenate"
                    , ([], Type.Arrow (Type.Tuple [Type.String, Type.String]) Type.String)
                    )
@@ -85,7 +88,10 @@ envWithUnit :: Env -> String -> ([String], Env) -> Env
 envWithUnit (Env x1s x2s x3s x4s) s x = Env ((s,x):x1s) x2s x3s x4s
 
 envWithModule :: Env -> String -> Env -> Env
-envWithModule (Env x1s x2s x3s x4s) s x = Env x1s ((s,x):x2s) x3s x4s
+envWithModule (Env x1s x2s x3s x4s) s x = Env x1s ((s, Right x):x2s) x3s x4s
+
+envWithSubstitution :: Env -> String -> [String] -> Env
+envWithSubstitution (Env x1s x2s x3s x4s) s x = Env x1s ((s, Left x):x2s) x3s x4s
 
 envWithFunction :: Env -> String -> ([String], Type.Type) -> Env
 envWithFunction (Env x1s x2s x3s x4s) s x = Env x1s x2s ((s,x):x3s) x4s
@@ -93,6 +99,12 @@ envWithFunction (Env x1s x2s x3s x4s) s x = Env x1s x2s ((s,x):x3s) x4s
 envWithConstructor :: Env -> String -> ([String], [Type.Type], Type.Type) -> Env
 envWithConstructor (Env x1s x2s x3s x4s) s x = Env x1s x2s x3s ((s,x):x4s)
 
+envStackLookupUnit :: [Env] -> [String] -> ([String], Env)
+envStackLookupUnit rs []    = error "envStackLookupUnit"
+envStackLookupUnit rs [s]   = envStackLookupUnit1 rs s
+envStackLookupUnit rs (s:q) = envLookupUnit1 (envResolve (envStackLookupMod1 rs s) q)
+
+{-
 envStackLookupUnit :: [Env] -> [String] -> ([String], Env)
 envStackLookupUnit [] q = error $ "envStackLookupUnit: " ++ show q
 envStackLookupUnit (r:rs) q = fromMaybe failure (envLookupUnit r q)
@@ -103,7 +115,14 @@ envLookupUnit r []    = error "envLookupUnit"
 envLookupUnit r [s]   = lookup s (envUnits r)
 envLookupUnit r (s:q) = do r <- lookup s (envModules r)
                            envLookupUnit r q
+-}
 
+envStackLookupMod :: [Env] -> [String] -> Env
+envStackLookupMod rs []    = last rs
+envStackLookupMod rs [s]   = envStackLookupMod1 rs s
+envStackLookupMod rs (s:q) = envLookupMod1 (envResolve (envStackLookupMod1 rs s) q)
+
+{-
 envStackLookupMod :: [Env] -> [String] -> Env
 envStackLookupMod [] q = error $ "envStackLookupMod: " ++ show q
 envStackLookupMod (r:rs) q = fromMaybe failure (envLookupMod r q)
@@ -114,6 +133,81 @@ envLookupMod r []    = error "envLookupMod"
 envLookupMod r [s]   = lookup s (envModules r)
 envLookupMod r (s:q) = do r <- lookup s (envModules r)
                           envLookupMod r q
+-}
+
+envStackLookupFunction :: [Env] -> [String] -> ([String], Type.Type)
+envStackLookupFunction r []    = error "envStackLookupFunction"
+envStackLookupFunction r [s]   = envStackLookupFunction1 r s
+envStackLookupFunction r (s:q) = envLookupFunction1 (envResolve (envStackLookupMod1 r s) q)
+
+envStackLookupConstructor :: [Env] -> [String] -> ([String], [Type.Type], Type.Type)
+envStackLookupConstructor r []    = error "envStackLookupConstructor"
+envStackLookupConstructor r [s]   = envStackLookupConstructor1 r s
+envStackLookupConstructor r (s:q) = envLookupConstructor1 (envResolve (envStackLookupMod1 r s) q)
+
+{-
+envStackLookupConstructor :: [Env] -> [String] -> ([String], [Type.Type], Type.Type)
+envStackLookupConstructor [] q = error $ "envStackLookupConstructor: " ++ show q
+envStackLookupConstructor (r:rs) q = fromMaybe failure (envLookupConstructor r q)
+  where failure = envStackLookupConstructor rs q
+-}
+
+envStackLookupUnit1 :: [Env] -> String -> ([String], Env)
+envStackLookupUnit1 []     s = error $ "envStackLookupUnit1: " ++ s
+envStackLookupUnit1 (r:rs) s = fromMaybe (envStackLookupUnit1 rs s) (lookup s (envUnits r))
+
+envStackLookupMod1 :: [Env] -> String -> Env
+envStackLookupMod1 []     s = error $ "envStackLookupMod1: " ++ s
+envStackLookupMod1 (r:rs) s = case lookup s (envModules r) of
+                                Nothing -> envStackLookupMod1 rs s
+                                Just (Left []) -> r
+                                Just (Left q)  -> envStackLookupMod rs q
+                                Just (Right r) -> r
+
+envStackLookupFunction1 :: [Env] -> String -> ([String], Type.Type)
+envStackLookupFunction1 []     s = error $ "envStackLookupFunction1: " ++ s
+envStackLookupFunction1 (r:rs) s = fromMaybe (envStackLookupFunction1 rs s) (lookup s (envFunctions r))
+
+envStackLookupConstructor1 :: [Env] -> String -> ([String], [Type.Type], Type.Type)
+envStackLookupConstructor1 []     s = error $ "envStackLookupConstructor1: " ++ s
+envStackLookupConstructor1 (r:rs) s = fromMaybe (envStackLookupConstructor1 rs s) (lookup s (envConstructors r))
+
+envResolve :: Env -> [String] -> (Env, String)
+envResolve r []    = error "envLookupQualifier"
+envResolve r [s]   = (r, s)
+envResolve r (s:q) = envResolve (envLookupMod1 (r, s)) q
+
+envLookupUnit1 :: (Env, String) -> ([String], Env)
+envLookupUnit1 (r, s) = fromMaybe (error "envLookupUnit1") (lookup s (envUnits r))
+
+envLookupMod1 :: (Env, String) -> Env
+envLookupMod1 (r, s) = case lookup s (envModules r) of
+                         Nothing -> error "envLookupMod1"
+                         Just (Left _) -> error "envLookupMod1"
+                         Just (Right r) -> r
+
+envLookupFunction1 :: (Env, String) -> ([String], Type.Type)
+envLookupFunction1 (r, s) = fromMaybe (error "envLookupFunction1") (lookup s (envFunctions r))
+
+{-
+envLookupFunction :: Env -> [String] -> Maybe ([String], Type.Type)
+envLookupFunction r []    = error "envLookupFunction"
+envLookupFunction r [s]   = lookup s (envFunctions r)
+envLookupFunction r (s:q) = do r' <- lookup s (envModules r)
+                               envLookupFunction r' q
+-}
+
+envLookupConstructor1 :: (Env, String) -> ([String], [Type.Type], Type.Type)
+envLookupConstructor1 (r, s) = fromMaybe (error "envLookupConstructor1") (lookup s (envConstructors r))
+
+{-
+envLookupConstructor :: Env -> [String] -> Maybe ([String], [Type.Type], Type.Type)
+envLookupConstructor r []    = error "envLookupConstructor"
+envLookupConstructor r [s]   = lookup s (envConstructors r)
+envLookupConstructor r (s:q) = do r' <- lookup s (envModules r)
+                                  envLookupConstructor r' q
+-}
+
 
 
 gatherProgram :: Program -> Env
@@ -125,6 +219,7 @@ gatherDec l rs r (ModDec _ s ds)         = envWithModule r s $ foldl (gatherDec 
 gatherDec l rs r (NewDec _ s q tys)      = envWithModule r s $ unitApply q (s:l) (envStackLookupUnit (r:rs) q) (map convertType tys)
 gatherDec l rs r (SumDec _ s ss cs)      = foldl (gatherConstructor (reverse (s:l)) ss) r cs
 gatherDec l rs r (UnitDec _ s ss ds)     = envWithUnit r s (ss, foldl (gatherDec (s:l) (r:rs)) emptyEnv ds)
+gatherDec l rs r (SubDec _ s q)          = envWithSubstitution r s q
 
 gatherConstructor :: [String] -> [String] -> Env -> (Pos, String, [Typ]) -> Env
 gatherConstructor q ss r (_, s, tys) =
@@ -141,8 +236,9 @@ envSubstitute q1 q2 ps (Env x1s x2s x3s x4s) = Env (map (unitSubstitute q1 q2 ps
                                                    (map (funSubstitute q1 q2 ps) x3s)
                                                    (map (conSubstitute q1 q2 ps) x4s)
 
-modSubstitute :: [String] -> [String] -> [(String, Type.Type)] -> (String, Env) -> (String, Env)
-modSubstitute q1 q2 ps (s, r) = (s, envSubstitute q1 q2 ps r)
+modSubstitute :: [String] -> [String] -> [(String, Type.Type)] -> (String, Either [String] Env) -> (String, Either [String] Env)
+modSubstitute q1 q2 ps (s, Left x)  = (s, Left x)
+modSubstitute q1 q2 ps (s, Right r) = (s, Right (envSubstitute q1 q2 ps r))
 
 unitSubstitute :: [String] -> [String] -> [(String, Type.Type)] -> (String, ([String], Env)) -> (String, ([String], Env))
 unitSubstitute q1 q2 ps (s, (ss, r)) = (s, (ss, envSubstitute q1 q2 ps' r))
@@ -183,6 +279,7 @@ convertDec rs (ModDec pos s ds)         = ModDec pos s (map (convertDec (envStac
 convertDec rs (NewDec pos s q tys)      = NewDec pos s q tys
 convertDec rs (FunDec pos s ss ps ty t) = FunDec pos s ss ps ty (runM (convertTerm t) const rs 0)
 convertDec rs (SumDec pos s ss cs)      = SumDec pos s ss cs
+convertDec rs (SubDec pos s q)          = SubDec pos s q
 
 data M a = M { runM :: forall b. (a -> Int -> b) -> [Env] -> Int -> b }
 
@@ -199,30 +296,8 @@ gen1 _ = gen
 lookupFunction :: [String] -> M ([String], Type.Type)
 lookupFunction q = M (\ k r -> k (envStackLookupFunction r q))
 
-envStackLookupFunction :: [Env] -> [String] -> ([String], Type.Type)
-envStackLookupFunction [] q = error $ "envStackLookupFunction: " ++ show q
-envStackLookupFunction (r:rs) q = fromMaybe failure (envLookupFunction r q)
-  where failure = envStackLookupFunction rs q
-
-envLookupFunction :: Env -> [String] -> Maybe ([String], Type.Type)
-envLookupFunction r []    = error "envLookupFunction"
-envLookupFunction r [s]   = lookup s (envFunctions r)
-envLookupFunction r (s:q) = do r' <- lookup s (envModules r)
-                               envLookupFunction r' q
-
 lookupConstructor :: [String] -> M ([String], [Type.Type], Type.Type)
 lookupConstructor q = M (\ k r -> k (envStackLookupConstructor r q))
-
-envStackLookupConstructor :: [Env] -> [String] -> ([String], [Type.Type], Type.Type)
-envStackLookupConstructor [] q = error $ "envStackLookupConstructor: " ++ show q
-envStackLookupConstructor (r:rs) q = fromMaybe failure (envLookupConstructor r q)
-  where failure = envStackLookupConstructor rs q
-
-envLookupConstructor :: Env -> [String] -> Maybe ([String], [Type.Type], Type.Type)
-envLookupConstructor r []    = error "envLookupConstructor"
-envLookupConstructor r [s]   = lookup s (envConstructors r)
-envLookupConstructor r (s:q) = do r' <- lookup s (envModules r)
-                                  envLookupConstructor r' q
 
 convertTerm :: Term -> M Term
 convertTerm t =

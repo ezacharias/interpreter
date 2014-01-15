@@ -29,6 +29,7 @@ data Token = EqualsToken
            | IntToken Integer
            | CommaToken
            | RightArrowToken
+           | RightCapArrowToken
            | UnderbarToken
            | ComposeToken
            | BangToken

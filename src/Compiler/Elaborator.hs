@@ -1,6 +1,5 @@
 module Compiler.Elaborator where
 
-import           Control.Monad   (foldM)
 import           Data.Maybe      (fromMaybe)
 
 import qualified Compiler.Lambda as Lambda
@@ -23,7 +22,7 @@ elaborate p = runM m emptyK [] emptyEnv 0
 
 data Name = Name
               { nameUnits        :: [(String, Name)]
-              , nameModules      :: [(String, Name)]
+              , nameModules      :: [(String, Either [String] Name)]
               , nameVariants     :: [String]
               , nameConstructors :: [(String, Int)]
               , nameFunctions    :: [String]
@@ -44,7 +43,10 @@ builtinName = Name [ ( "Escape"
                             ]
                      )
                    ]
-                   []
+                   [ ( "Root"
+                     , Left []
+                     )
+                   ]
                    ["Output", "String"]
                    [ ("Continue", 1)
                    , ("Exit", 0)
@@ -61,7 +63,7 @@ builtinName = Name [ ( "Escape"
 nameWithUnit :: Name -> String -> Name -> Name
 nameWithUnit (Name x1s x2s x3s x4s x5s) s n = Name ((s, n) : x1s) x2s x3s x4s x5s
 
-nameWithModule :: Name -> String -> Name -> Name
+nameWithModule :: Name -> String -> Either [String] Name -> Name
 nameWithModule (Name x1s x2s x3s x4s x5s) s n = Name x1s ((s, n) : x2s) x3s x4s x5s
 
 nameWithVariant :: Name -> String -> Name
@@ -73,6 +75,44 @@ nameWithConstructor (Name x1s x2s x3s x4s x5s) s i = Name x1s x2s x3s ((s,i):x4s
 nameWithFunction :: Name -> String -> Name
 nameWithFunction (Name x1s x2s x3s x4s x5s) s = Name x1s x2s x3s x4s (s:x5s)
 
+
+namesLookupUnit :: [Name] -> [String] -> Name
+namesLookupUnit ns []    = error "namesLookupUnit"
+namesLookupUnit ns [s]   = namesLookupUnit1 ns s
+namesLookupUnit ns (s:q) = nameLookupUnit1 (nameResolve (namesLookupModule1 ns s) q)
+
+namesLookupUnit1 :: [Name] -> String -> Name
+namesLookupUnit1 []     s = error "namesLookupUnit1"
+namesLookupUnit1 (n:ns) s =  fromMaybe (namesLookupUnit1 ns s) (lookup s (nameUnits n))
+
+nameLookupUnit1 :: (Name, String) -> Name
+nameLookupUnit1 (n, s) = fromMaybe (error "nameLookupUnit1") (lookup s (nameUnits n))
+
+nameResolve :: Name -> [String] -> (Name, String)
+nameResolve n []    = error "nameResolve"
+nameResolve n [s]   = (n, s)
+nameResolve n (s:q) = nameResolve (nameLookupModule1 (n, s)) q
+
+nameLookupModule1 :: (Name, String) -> Name
+nameLookupModule1 (n, s) = case lookup s (nameModules n) of
+                             Nothing        -> error "nameLookupModule1"
+                             Just (Left _)  -> error "nameLookupModule1"
+                             Just (Right n) -> n
+
+namesLookupModule :: [Name] -> [String] -> Name
+namesLookupModule ns []    = last ns
+namesLookupModule ns [s]   = namesLookupModule1 ns s
+namesLookupModule ns (s:q) = nameLookupModule1 (nameResolve (namesLookupModule1 ns s) q)
+
+namesLookupModule1 :: [Name] -> String -> Name
+namesLookupModule1 []     s = error "namesLookupModule1"
+namesLookupModule1 (n:ns) s = case lookup s (nameModules n) of
+                                Nothing        -> namesLookupModule1 ns s
+                                Just (Left []) -> last (n:ns)
+                                Just (Left q)  -> namesLookupModule ns q
+                                Just (Right n) -> n
+
+{-
 namesLookupUnit :: [Name] -> [String] -> Name
 namesLookupUnit [] q = error $ "namesLookupUnit: " ++ show q
 namesLookupUnit (n:ns) q = fromMaybe (namesLookupUnit ns q) (nameLookupUnit n q)
@@ -82,6 +122,7 @@ nameLookupUnit n [] = error "nameLookupUnit"
 nameLookupUnit n [s] = lookup s (nameUnits n)
 nameLookupUnit n (s:q) = do n <- lookup s (nameModules n)
                             nameLookupUnit n q
+-}
 
 gather :: Syntax.Program -> M Name
 gather p = return $ gatherProgram p
@@ -91,10 +132,11 @@ gatherProgram (Syntax.Program ds) = foldl (gatherDec []) builtinName ds
 
 gatherDec :: [Name] -> Name -> Syntax.Dec -> Name
 gatherDec ns n (Syntax.FunDec _ s _ _ _ _) = nameWithFunction n s
-gatherDec ns n (Syntax.ModDec _ s ds)      = nameWithModule n s (foldl (gatherDec (n:ns)) emptyName ds)
-gatherDec ns n (Syntax.NewDec _ s q _)     = nameWithModule n s (namesLookupUnit (n:ns) q)
+gatherDec ns n (Syntax.ModDec _ s ds)      = nameWithModule n s (Right (foldl (gatherDec (n:ns)) emptyName ds))
+gatherDec ns n (Syntax.NewDec _ s q _)     = nameWithModule n s (Right (namesLookupUnit (n:ns) q))
 gatherDec ns n (Syntax.SumDec _ s _ cs)    = foldl gatherConstructor (nameWithVariant n s) (zip cs [0..])
 gatherDec ns n (Syntax.UnitDec _ s _ ds)   = nameWithUnit n s (foldl (gatherDec (n:ns)) emptyName ds)
+gatherDec ns n (Syntax.SubDec _ s q)       = nameWithModule n s (Left q)
 
 gatherConstructor :: Name -> ((Syntax.Pos, String, [Syntax.Typ]) , Int) -> Name
 gatherConstructor n ((_, s, _), i) = nameWithFunction (nameWithConstructor n s i) s
@@ -106,7 +148,7 @@ gatherConstructor n ((_, s, _), i) = nameWithFunction (nameWithConstructor n s i
 
 data Rename = Rename
                 { renameUnits        :: [(String, UnitClosureIdent)]
-                , renameMods         :: [(String, Rename)]
+                , renameMods         :: [(String, Either [String] Rename)]
                 , renameVariants     :: [(String, Lambda.VariantIdent)]
                 , renameConstructors :: [(String, Lambda.ConstructorIndex)]
                 , renameFunctions    :: [(String, Lambda.TagIdent)]
@@ -129,10 +171,14 @@ update (Name x1s x2s x3s x4s x5s) = do
 updateUnit :: (String, Name) -> M (String, Int)
 updateUnit (s, _) = updateName s
 
-updateModule :: (String, Name) -> M (String, Rename)
-updateModule (s, n) = do
-  r <- update n
-  return (s, r)
+updateModule :: (String, Either [String] Name) -> M (String, Either [String] Rename)
+updateModule (s, x) =
+  case x of
+    Left q ->
+      return $ (s, Left q)
+    Right n -> do
+      r <- update n
+      return (s, Right r)
 
 updateName :: String -> M (String, Int)
 updateName s = do
@@ -300,6 +346,7 @@ convertDec (Syntax.SumDec _ s ss cs)    = convertSumDec s ss cs
 convertDec (Syntax.UnitDec _ s1 s2s ds) = do d <- lookupUnit [s1]
                                              rs <- getRenameStack
                                              exportUnitClosure d $ unitClosure rs s2s ds
+convertDec (Syntax.SubDec _ s  q)       = return ()
 
 convertCurried :: [Syntax.Pat] -> Syntax.Term -> M Lambda.Term
 convertCurried []     t = convertTerm t
@@ -480,22 +527,41 @@ lookupConstructor q = do rs <- getRenameStack
                          return $ renameStackLookupConstructor rs q
 
 renameStackLookupConstructor :: [Rename] -> [String] -> Int
-renameStackLookupConstructor []     q = error $ "impossible: " ++ show q
-renameStackLookupConstructor (r:rs) q = fromMaybe failure (renameLookupConstructor r q)
-  where failure = renameStackLookupConstructor rs q
+renameStackLookupConstructor rs []    = error "renameStackLookupConstructor"
+renameStackLookupConstructor rs [s]   = renameStackLookupConstructor1 rs s
+renameStackLookupConstructor rs (s:q) = renameLookupConstructor (renameStackLookupMod1 rs s) q
 
-renameLookupConstructor :: Rename -> [String] -> Maybe Int
-renameLookupConstructor r []    = error "impossible"
-renameLookupConstructor r [s]   = lookup s (renameConstructors r)
-renameLookupConstructor r (s:q) = do r <- lookup s (renameMods r)
-                                     renameLookupConstructor r q
+renameLookupConstructor :: Rename -> [String] -> Int
+renameLookupConstructor r []    = error "renameLookupConstructor"
+renameLookupConstructor r [s]   = fromMaybe (error "renameLookupConstructor") (lookup s (renameConstructors r))
+renameLookupConstructor r (s:q) = renameLookupConstructor (renameLookupMod1 r s) q
+
+renameStackLookupConstructor1 :: [Rename] -> String -> Int
+renameStackLookupConstructor1 []     s = error "renameStackLookupConstructor1"
+renameStackLookupConstructor1 (r:rs) s = fromMaybe (renameStackLookupConstructor1 rs s) (lookup s (renameConstructors r))
+
 
 lookupFunction :: [String] -> M Int
 lookupFunction q = do rs <- getRenameStack
                       return $ renameStackLookupFunction rs q
 
 renameStackLookupFunction :: [Rename] -> [String] -> Int
-renameStackLookupFunction []     q = error $ "impossible: " ++ show q
+renameStackLookupFunction rs []    = error "renameStackLookupFunction"
+renameStackLookupFunction rs [s]   = renameStackLookupFunction1 rs s
+renameStackLookupFunction rs (s:q) = renameLookupFunction (renameStackLookupMod1 rs s) q
+
+renameLookupFunction :: Rename -> [String] -> Int
+renameLookupFunction r []    = error "renameLookupFunction"
+renameLookupFunction r [s]   = fromMaybe (error "renameLookupFunction") (lookup s (renameFunctions r))
+renameLookupFunction r (s:q) = renameLookupFunction (renameLookupMod1 r s) q
+
+renameStackLookupFunction1 :: [Rename] -> String -> Int
+renameStackLookupFunction1 []     s = error "renameStackLookupFunction1"
+renameStackLookupFunction1 (r:rs) s = fromMaybe (renameStackLookupFunction1 rs s) (lookup s (renameFunctions r))
+
+{-
+renameStackLookupFunction :: [Rename] -> [String] -> Int
+renameStackLookupFunction []     q = error $ "impossible2: " ++ show q
 renameStackLookupFunction (r:rs) q = fromMaybe failure (renameLookupFunction r q)
   where failure = renameStackLookupFunction rs q
 
@@ -504,6 +570,7 @@ renameLookupFunction r []    = error "impossible"
 renameLookupFunction r [s]   = lookup s (renameFunctions r)
 renameLookupFunction r (s:q) = do r <- lookup s (renameMods r)
                                   renameLookupFunction r q
+-}
 
 lookupType :: String -> M Lambda.Type
 lookupType s = do rs <- getRenameStack
@@ -519,6 +586,21 @@ lookupUnit q = do rs <- getRenameStack
                   return $ renameStackLookupUnit rs q
 
 renameStackLookupUnit :: [Rename] -> [String] -> Int
+renameStackLookupUnit rs []    = error "renameStackLookupUnit"
+renameStackLookupUnit rs [s]   = renameStackLookupUnit1 rs s
+renameStackLookupUnit rs (s:q) = renameLookupUnit (renameStackLookupMod1 rs s) q
+
+renameLookupUnit :: Rename -> [String] -> Int
+renameLookupUnit r []    = error "renameLookupUnit"
+renameLookupUnit r [s]   = fromMaybe (error "renameLookupUnit") (lookup s (renameUnits r))
+renameLookupUnit r (s:q) = renameLookupUnit (renameLookupMod1 r s) q
+
+renameStackLookupUnit1 :: [Rename] -> String -> Int
+renameStackLookupUnit1 []     s = error "renameStackLookupUnit1"
+renameStackLookupUnit1 (r:rs) s = fromMaybe (renameStackLookupUnit1 rs s) (lookup s (renameUnits r))
+
+{-
+renameStackLookupUnit :: [Rename] -> [String] -> Int
 renameStackLookupUnit (r:rs) q  = fromMaybe failure (renameLookupUnit r q)
                                  where failure = renameStackLookupUnit rs q
 renameStackLookupUnit []     _  = error "impossible b"
@@ -528,12 +610,27 @@ renameLookupUnit r []     = error "impossible c"
 renameLookupUnit r (s:[]) = lookup s (renameUnits r)
 renameLookupUnit r (s:q)  = do r' <- lookup s (renameMods r)
                                renameLookupUnit r' q
-
+-}
 
 lookupVariant :: [String] -> M Lambda.VariantIdent
 lookupVariant q = do rs <- getRenameStack
                      return $ renameStackLookupVariant rs q
 
+renameStackLookupVariant :: [Rename] -> [String] -> Int
+renameStackLookupVariant rs []    = error "renameStackLookupVariant"
+renameStackLookupVariant rs [s]   = renameStackLookupVariant1 rs s
+renameStackLookupVariant rs (s:q) = renameLookupVariant (renameStackLookupMod1 rs s) q
+
+renameLookupVariant :: Rename -> [String] -> Int
+renameLookupVariant r []    = error "renameLookupVariant"
+renameLookupVariant r [s]   = fromMaybe (error "renameLookupVariant") (lookup s (renameVariants r))
+renameLookupVariant r (s:q) = renameLookupVariant (renameLookupMod1 r s) q
+
+renameStackLookupVariant1 :: [Rename] -> String -> Int
+renameStackLookupVariant1 []     s = error "renameStackLookupVariant1"
+renameStackLookupVariant1 (r:rs) s = fromMaybe (renameStackLookupVariant1 rs s) (lookup s (renameVariants r))
+
+{-
 renameStackLookupVariant :: [Rename] -> [String] -> Int
 renameStackLookupVariant (r:rs) q =
   fromMaybe failure (renameLookupVariant r q)
@@ -545,19 +642,33 @@ renameLookupVariant r []     = error "impossible"
 renameLookupVariant r (s:[]) = lookup s (renameVariants r)
 renameLookupVariant r (s:q)  = do r' <- lookup s (renameMods r)
                                   renameLookupVariant r' q
+-}
 
 lookupMod :: [String] -> M Rename
 lookupMod q = do rs <- getRenameStack
                  return $ renameStackLookupMod rs q
 
 renameStackLookupMod :: [Rename] -> [String] -> Rename
-renameStackLookupMod (r:rs) q  = fromMaybe failure (renameLookupMod r q)
-                                 where failure = renameStackLookupMod rs q
-renameStackLookupMod []     _  = error "impossible d"
+renameStackLookupMod rs []    = last rs
+renameStackLookupMod rs (s:q) = (renameLookupMod (renameStackLookupMod1 rs s) q)
 
-renameLookupMod :: Rename -> [String] -> Maybe Rename
-renameLookupMod = foldM f
-  where f r s = lookup s (renameMods r)
+renameStackLookupMod1 :: [Rename] -> String -> Rename
+renameStackLookupMod1 [] s = error "renameStackLookupMod1"
+renameStackLookupMod1 (r:rs) s = case lookup s (renameMods r) of
+                                   Nothing        -> renameStackLookupMod1 rs s
+                                   Just (Left []) -> last (r:rs)
+                                   Just (Left q)  -> renameStackLookupMod rs q
+                                   Just (Right r) -> r
+
+renameLookupMod :: Rename -> [String] -> Rename
+renameLookupMod r []    = r
+renameLookupMod r (s:q) = renameLookupMod (renameLookupMod1 r s) q
+
+renameLookupMod1 :: Rename -> String -> Rename
+renameLookupMod1 r s = case lookup s (renameMods r) of
+                         Nothing        -> error "renameLookupMod1"
+                         Just (Left q)  -> error "renameLookupMod1"
+                         Just (Right r) -> r
 
 
 --------------------------------------------------------------------------------
