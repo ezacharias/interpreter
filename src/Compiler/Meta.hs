@@ -344,11 +344,13 @@ convertTerm t =
       return $ TupleTerm pos ms ts'
     UnitTerm pos ->
       return $ UnitTerm pos
-    UpperTerm pos _ _ s -> do
+    UpperTerm pos _ _ s tas -> do
       (ss, ty) <- lookupFunction s
-      ts' <- mapM gen1 ss
+      ts' <- case tas of
+        Nothing -> mapM gen1 ss
+        Just tas -> return $ map convertType tas
       let ty' = Type.rename (zip ss ts') ty
-      return $ UpperTerm pos ts' ty' s
+      return $ UpperTerm pos ts' ty' s tas
     VariableTerm pos s ->
       return $ VariableTerm pos s
 

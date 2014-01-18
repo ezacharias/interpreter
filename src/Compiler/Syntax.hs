@@ -25,7 +25,7 @@ data Term = ApplyTerm Type.Type Term Term
           | StringTerm Pos String
           | TupleTerm Pos [Type.Type] [Term]
           | UnitTerm Pos
-          | UpperTerm Pos [Type.Type] Type.Type Qual
+          | UpperTerm Pos [Type.Type] Type.Type Qual (Maybe [Typ])
           | VariableTerm Pos String
             deriving (Eq, Show)
 

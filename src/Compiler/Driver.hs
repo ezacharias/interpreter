@@ -3,18 +3,19 @@
 module Compiler.Driver where
 
 import           Control.Monad
-import           System.Exit          (exitFailure)
+import           System.Exit            (exitFailure)
 import           System.IO
 
-import qualified Compiler.Elaborator  as Elaborator
-import qualified Compiler.Interpreter as Interpreter
-import qualified Compiler.Lambda      as Lambda
-import qualified Compiler.Meta        as Meta
+import qualified Compiler.Elaborator    as Elaborator
+import qualified Compiler.Interpreter   as Interpreter
+import qualified Compiler.Lambda        as Lambda
+import qualified Compiler.Meta          as Meta
 import           Compiler.Parser
-import qualified Compiler.Syntax      as Syntax
+import qualified Compiler.Syntax        as Syntax
+import qualified Compiler.SyntaxChecker as SyntaxChecker
 import           Compiler.Token
 import           Compiler.Tokenizer
-import qualified Compiler.TypeChecker as TypeChecker
+import qualified Compiler.TypeChecker   as TypeChecker
 
 data Driver a = DriverReturn a
               | DriverPerformIO (IO (Driver a))
@@ -78,8 +79,10 @@ maybeHGetChar handle = check =<< hIsEOF handle
   where check True  = return Nothing
         check False = liftM Just $ hGetChar handle
 
-syntaxCheck :: a -> Driver a
-syntaxCheck = return
+syntaxCheck :: Syntax.Program -> Driver Syntax.Program
+syntaxCheck x = check $ SyntaxChecker.syntaxCheckProgram x
+  where check Nothing    = return x
+        check (Just msg) = DriverError msg
 
 typeCheck :: Syntax.Program -> Driver Syntax.Program
 typeCheck x = check $ TypeChecker.inferProgram (Meta.addMetavariables x)

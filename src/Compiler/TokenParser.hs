@@ -237,14 +237,25 @@ keyword s1 = do
     LowerToken s2 | s1 == s2 && not (elem s1 (envVal r)) -> return ()
     _ -> failurePos pos
 
+typArguments :: AmbiguousParser [Syntax.Typ]
+typArguments = do
+  leftBracket
+  e <- liftM2 (:) typ0 (many $ comma >> typ0)
+  rightBracket
+  return e
+
+typParameters :: AmbiguousParser [String]
+typParameters = do
+  leftBracket
+  e <- liftM2 (:) lower (many $ comma >> lower)
+  rightBracket
+  return e
+
 funDec :: AmbiguousParser Syntax.Dec
 funDec = do
   pos@(Syntax.Pos _ _ c) <- position
   e1 <- upper
-  e2 <- choice [ do leftBracket
-                    e2 <- liftM2 (:) lower (many $ comma >> lower)
-                    rightBracket
-                    return e2
+  e2 <- choice [ typParameters
                , return []
                ]
   e3 <- many pat3
@@ -345,8 +356,9 @@ exp3 = choice [ do pos <- position
                    else
                      failurePosMsg pos $ "Unbound variable " ++ x ++ "."
               , do pos <- position
-                   x <- qual
-                   return $ Syntax.UpperTerm pos [] Type.Unit x
+                   x1 <- qual
+                   x2s <- optional typArguments
+                   return $ Syntax.UpperTerm pos [] Type.Unit x1 x2s
               , do pos <- position
                    x <- string
                    return $ Syntax.StringTerm pos x
@@ -470,10 +482,7 @@ upperTyp :: AmbiguousParser Syntax.Typ
 upperTyp = do
   pos <- position
   e1 <- qual
-  e2 <- choice [ do leftBracket
-                    e2 <- liftM2 (:) typ0 (many $ comma >> typ0)
-                    rightBracket
-                    return e2
+  e2 <- choice [ typArguments
                , return []
                ]
   return $ Syntax.UpperTyp pos e1 e2
@@ -486,10 +495,7 @@ sumDec = do
   pos@(Syntax.Pos _ l c) <- position
   keyword "sum"
   e1 <- upper
-  e2 <- choice [ do leftBracket
-                    e2 <- liftM2 (:) lower (many $ comma >> lower)
-                    rightBracket
-                    return e2
+  e2 <- choice [ typParameters
                , return []
                ]
   e3 <- many $ indented (c + 2) constructor
@@ -526,10 +532,7 @@ newDec = do
   e1 <- upper
   equals
   e2 <- qual
-  e3 <- choice [ do leftBracket
-                    e3 <- liftM2 (:) typ0 (many $ comma >> typ0)
-                    rightBracket
-                    return e3
+  e3 <- choice [ typArguments
                , return []
                ]
   return $ Syntax.NewDec pos e1 e2 e3
@@ -539,10 +542,7 @@ unitDec = do
   pos@(Syntax.Pos _ _ c) <- position
   keyword "unit"
   e1 <- upper
-  e2 <- choice [ do leftBracket
-                    e3 <- liftM2 (:) lower (many $ comma >> lower)
-                    rightBracket
-                    return e3
+  e2 <- choice [ typParameters
                , return []
                ]
   e3 <- many $ indented (c + 2) dec

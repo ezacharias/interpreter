@@ -147,10 +147,14 @@ interference with code.
     new F = Fork
 
     Main : Output
+      bind x to Nil⟦Bool⟧
       in IO.With
-        IO.Write("1")
+        IO.Write(Identity⟦String⟧(One))
         bind _ to F.Fork(A, B)
         IO.Write("2")
+
+    One : String
+      "1"
 
     A() : ()
       IO.Write("A1")
@@ -225,6 +229,50 @@ interference with code.
  -- Comments are usually written with a double dash in the gutter, so it is
  -- easy to see comment markers.
 
- -- sum List⟦a⟧
- --   Nil
- --   Cons(a, List⟦a⟧)
+    sum List⟦a⟧
+      Nil
+      Cons(a, List⟦a⟧)
+
+
+It would be better if fold 
+
+
+    sum Fold⟦d, a⟧
+      Finished(d)
+      Next(a)(a ⟶ Fold⟦d, a⟧)
+
+    unit Fold⟦a⟧
+
+      new E = Escape⟦a, a⟧
+
+      With⟦d⟧(f : () ⟶ d) : Fold⟦d, a⟧
+        E.Catch(Compose(Finished)(f))(Next)
+
+      Yield(x : a) : a
+        E.Throw(x)
+
+
+This code does not work. I'm not sure about it yet. Critically, the semantics
+should be that new is run every time the function is called, but that would
+require dynamically created types. The other option is to use type equality,
+but that would cause other complications.
+
+   FoldList⟦a⟧(xs : List⟦a⟧) : Fold⟦List⟦a⟧, a⟧
+     new M = Fold⟦a⟧
+     in M.With
+       FoldList1(M.Yield)(xs)
+
+   FoldList1⟦a⟧(yield : a ⟶ a)(xs : List⟦a⟧) : List⟦a⟧
+     case xs
+       Nil
+         Nil
+       Cons(x, xs)
+         Cons(yield(x), FoldList1(yield)(xs))
+
+I think applicative would probably be best. Something like this:
+
+   new M⟦a⟧ = Fold⟦a⟧
+
+We could use the same notation for module names. I'm unsure of the implications
+of this. We might be able to sometimes infer the type so we don't have to
+explicitly state it. This would be part of regular type inference.

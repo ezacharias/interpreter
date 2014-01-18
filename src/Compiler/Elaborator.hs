@@ -404,7 +404,7 @@ convertTerm t =
       return $ Lambda.TupleTerm [t1, t2]
     Syntax.UnitTerm _ ->
       return Lambda.UnitTerm
-    Syntax.UpperTerm _ tys _ q -> do
+    Syntax.UpperTerm _ tys _ q _ -> do
       d   <- lookupFunction q
       tys <- mapM convertTypeType tys
       return $ Lambda.TypeApplyTerm d tys

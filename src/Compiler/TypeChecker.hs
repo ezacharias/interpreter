@@ -125,7 +125,7 @@ concreteTerm s (Syntax.SeqTerm t1 t2)           = Syntax.SeqTerm (concreteTerm s
 concreteTerm s (Syntax.StringTerm p x)          = Syntax.StringTerm p x
 concreteTerm s (Syntax.TupleTerm p ms xs)       = Syntax.TupleTerm p (map (concreteType s) ms) (map (concreteTerm s) xs)
 concreteTerm s (Syntax.UnitTerm p)              = Syntax.UnitTerm p
-concreteTerm s (Syntax.UpperTerm p ts ty x)     = Syntax.UpperTerm p (map (concreteType s) ts) (concreteType s ty) x
+concreteTerm s (Syntax.UpperTerm p ts ty x xs)  = Syntax.UpperTerm p (map (concreteType s) ts) (concreteType s ty) x xs
 
 
 concreteRule :: Sigma -> (Syntax.Pat, Syntax.Term) -> (Syntax.Pat, Syntax.Term)
@@ -298,7 +298,7 @@ typeCheckTerm g s t (Syntax.UnitTerm p) =
     Nothing -> errorMsg s p t Type.Unit
     Just (t, s) -> Right s
 
-typeCheckTerm g s ty (Syntax.UpperTerm p ts ty2 x) =
+typeCheckTerm g s ty (Syntax.UpperTerm p ts ty2 x xs) =
   case unify s ty ty2 of
     Nothing -> errorMsg s p ty ty2
     Just (ty, s) -> Right s
