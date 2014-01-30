@@ -9,7 +9,7 @@ import           Test.Framework
 import           Test.Framework.Providers.HUnit
 import           Test.HUnit.Base                hiding (Test)
 
-import qualified Compiler.Elaborator            as Elaborator
+import qualified Compiler.ElaboratorOld            as Elaborator
 -- import qualified Compiler.Lambda                as Lambda
 import qualified Compiler.Syntax                as Syntax
 

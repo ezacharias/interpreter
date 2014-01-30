@@ -14,4 +14,6 @@ ghc-args:
 - -fno-warn-name-shadowing
 - -fno-warn-unused-matches
 - -fno-warn-unused-binds
-excluded-modules: []
+excluded-modules:
+- src/Compiler/ElaboratorOld.hs
+- src/Compiler/InterpreterOld.hs

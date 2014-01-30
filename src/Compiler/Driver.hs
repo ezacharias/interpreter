@@ -8,9 +8,9 @@ import           System.IO
 
 import qualified Compiler.Elaborator    as Elaborator
 import qualified Compiler.Interpreter   as Interpreter
-import qualified Compiler.Lambda        as Lambda
 import qualified Compiler.Meta          as Meta
 import           Compiler.Parser
+import qualified Compiler.Simple        as Simple
 import qualified Compiler.Syntax        as Syntax
 import qualified Compiler.SyntaxChecker as SyntaxChecker
 import           Compiler.Token
@@ -89,10 +89,10 @@ typeCheck x = check $ TypeChecker.inferProgram (Meta.addMetavariables x)
   where check (Left msg) = DriverError msg
         check (Right x') = return x'
 
-elaborate :: Syntax.Program -> Driver Lambda.Program
+elaborate :: Syntax.Program -> Driver Simple.Program
 elaborate x = return $ Elaborator.elaborate x
 
-interpret :: Lambda.Program -> Driver ()
+interpret :: Simple.Program -> Driver ()
 interpret p = check $ Interpreter.interpret p
   where check Interpreter.ExitStatus         = return ()
         check (Interpreter.EscapeStatus _ _) = DriverError "interpreter: uncaught throw"
