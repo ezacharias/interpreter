@@ -8,9 +8,9 @@ data Program = Program [Dec]
 type Name = String
 type Qual = [Name]
 
-data Dec = FunDec Pos String [String] [Pat] Typ Term
+data Dec = FunDec Pos [Type.Type] Type.Type String [String] [Pat] Typ Term
          | ModDec Pos String [Dec]
-         | NewDec Pos String Qual [Typ]
+         | NewDec Pos [Type.Type] String Qual [Typ]
          | SubDec Pos String Qual
          | SumDec Pos String [String] [(Pos, String, [Typ])]
          | UnitDec Pos String [String] [Dec]

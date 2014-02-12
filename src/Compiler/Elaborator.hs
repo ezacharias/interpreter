@@ -1,17 +1,332 @@
 module Compiler.Elaborator where
 
-import Data.List (find)
-import Data.Maybe (fromMaybe)
--- import Data.Map (Map)
--- import qualified Data.Map as Map
+-- import Data.List (find)
+-- import Data.Maybe (fromMaybe)
+import Data.Map (Map)
+import qualified Data.Map as Map
 
 import qualified Compiler.Syntax as Syntax
 import qualified Compiler.Simple as Simple
 import qualified Compiler.Type as Type
 
 elaborate :: Syntax.Program -> Simple.Program
-elaborate = undefined
+elaborate p = run p $ do
+  d <- getFun [("Main", [])]
+  finish
+  x1 <- getProgramTags
+  x2 <- getProgramSums
+  x3 <- getProgramFuns
+  return $ Simple.Program x1 x2 x3 d
 
+type Qual = [(String, [Type.Type])]
+type Name = (String, [Type.Type])
+type Field = (String, [Type.Type])
+
+newtype M a = M { runM :: (a -> Simple.Program) -> Simple.Program }
+
+instance Monad M where
+  return x = M (\ k -> k x)
+  m >>= f = M (\ k -> runM m (\ x -> runM (f x) k))
+
+getExportedFuns :: M (Map Qual Int)
+getExportedFuns = undefined
+
+setExportedFuns :: Map Qual Int -> M ()
+setExportedFuns = undefined
+
+gen :: M Simple.Ident
+gen = undefined
+
+getFun :: Qual -> M Simple.Ident
+getFun q = do
+  r <- getEnv
+  (q, f) <- return $ envGetFun r q
+  x <- getExportedFuns
+  case Map.lookup q x of
+    Nothing -> do
+      d <- gen
+      setExportedFuns (Map.insert q d x)
+      addWork (f d)
+      return d
+    Just d -> return d
+
+addWork :: M () -> M ()
+addWork = undefined
+
+setEnv :: Env -> M ()
+setEnv = undefined
+
+-- An environment is the full path, the local type bindings, and the declarations.
+type Env = [(Full, [(String, Type.Type)], [Syntax.Dec])]
+type Full = Qual
+
+getEnv :: M Env
+getEnv = undefined
+
+finish :: M ()
+finish = undefined
+
+getProgramTags :: M (Simple.IdentMap Simple.Tag)
+getProgramTags = undefined
+
+getProgramSums :: M (Simple.IdentMap Simple.Sum)
+getProgramSums = undefined
+
+getProgramFuns :: M (Simple.IdentMap Simple.Fun)
+getProgramFuns = undefined
+
+run :: Syntax.Program -> M Simple.Program -> Simple.Program
+run = undefined
+
+envGetFun :: Env -> Qual -> (Qual, Simple.Ident -> M ())
+envGetFun r [n]    = envGetFunWithName r n
+envGetFun r (n:ns) = envGetFunWithFields (envGetModWithName r n) ns
+envGetFun r []     = error "envGetFun"
+
+envGetFunWithFields :: Env -> Qual -> (Qual, Simple.Ident -> M ())
+envGetFunWithFields [] _ = error "envGetFunWithFields"
+envGetFunWithFields _ [] = error "envGetFunWithFields"
+envGetFunWithFields (r@((q, _, ds):r')) [(s1, tys)] = check $ search has ds
+  where check Nothing = error "envGetFunWithFields"
+        check (Just x) = x
+        has dec =
+          case dec of
+            Syntax.FunDec _ ty0s ty0 s2 ss ps _ t | s1 == s2 ->
+              let q' = q ++ [(s1, tys)]
+                  f d = do
+                    setEnv r
+                    t <- elaborateLambda ps undefined t
+                    ty0s <- mapM elaborateType ty0s
+                    ty0 <- elaborateType ty0
+                    ty <- return $ foldr Simple.ArrowType ty0 ty0s
+                    addFun d (Simple.Fun ty t)
+               in Just (q', f)
+            _ ->
+              Nothing
+envGetFunWithFields (r@((q, _, ds):r')) ((s1, tys):ns) = check $ search has ds
+  where check Nothing = error "envGetFunWithFields"
+        check (Just r'') = envGetFunWithFields r'' ns
+        has dec =
+          case dec of
+            Syntax.ModDec _ s2 ds | s1 == s2 ->
+              Just ((q ++ [(s1, tys)], [], ds) : r)
+            Syntax.NewDec _ ty2s s2 s3s _ | s1 == s2 ->
+              let q' = let f [] = error "envGetFunWithFields"
+                           f [s3] = [(s3, ty2s)]
+                           f (s3:s3s) = (s3, []) : f s3s
+                        in f s3s
+               in Just (envGetUnit r q' (q ++ [(s1, tys)]))
+            _ ->
+              Nothing
+
+-- The second path is the full name of the new instance.
+envGetUnit :: Env -> Qual -> (Full -> Env)
+envGetUnit _ []     = error "envGetUnit"
+envGetUnit r [n]    = envGetUnitWithName r n
+envGetUnit r (n:ns) = envGetUnitWithFields (envGetModWithName r n) ns
+
+envGetUnitWithName :: Env -> Name -> (Full -> Env)
+envGetUnitWithName [] _ = error "envGetUnitWithName"
+envGetUnitWithName (r@((q, _, ds):r')) (s1, tys) = check $ search has ds
+  where check Nothing = envGetUnitWithName r' (s1, tys)
+        check (Just x) = x
+        has dec =
+          case dec of
+            Syntax.UnitDec _ s2 s3s ds | s1 == s2 ->
+              Just (\ q' -> ((q', zip s3s (tailArgs q'), ds) : r))
+            _ ->
+              Nothing
+        tailArgs [] = error "envGetUnitWithName"
+        tailArgs [(_, tys)] = tys
+        tailArgs (x:xs) = tailArgs xs
+
+envGetUnitWithFields :: Env -> Qual -> (Full -> Env)
+envGetUnitWithFields [] _ = error "envGetUnitWithFields"
+envGetUnitWithFields _ [] = error "envGetUnitWithFields"
+envGetUnitWithFields (r@((q, _, ds):r')) [(s1, tys)] = check $ search has ds
+  where check Nothing = error "envGetUnitWithFields"
+        check (Just x) = x
+        has dec =
+          case dec of
+            Syntax.UnitDec _ s2 s3s ds | s1 == s2 ->
+              Just (\ q -> ((q, zip s3s (tailArgs q), ds) : r))
+            _ ->
+              Nothing
+        tailArgs [] = error "envGetUnitWithName"
+        tailArgs [(_, tys)] = tys
+        tailArgs (x:xs) = tailArgs xs
+envGetUnitWithFields (r@((q, _, ds):r')) ((s1, tys):ns) = check $ search has ds
+  where check Nothing = error "envGetUnitWithFields"
+        check (Just r'') = envGetUnitWithFields r'' ns
+        has dec =
+          case dec of
+            Syntax.ModDec _ s2 ds | s1 == s2 ->
+              Just ((q ++ [(s1, tys)], [], ds) : r)
+            Syntax.NewDec _ ty2s s2 s3s _ | s1 == s2 ->
+              let q' = let f [] = error "envGetUnitWithFields"
+                           f [s3] = [(s3, ty2s)]
+                           f (s3:s3s) = (s3, []) : f s3s
+                        in f s3s
+               in Just (envGetUnit r q' (q ++ [(s1, tys)]))
+            _ ->
+              Nothing
+
+envGetMod :: Env -> Qual -> Env
+envGetMod _ [] = error "envGetMod"
+envGetMod r (n:ns) = envGetModWithFields (envGetModWithName r n) ns
+
+envGetModWithFields :: Env -> Qual -> Env
+envGetModWithFields [] _ = error "envGetModWithFields"
+envGetModWithFields r [] = r
+envGetModWithFields (r@((q, _, ds):r')) ((s1, tys):ns) = check $ search has ds
+  where check Nothing = error "envGetMod"
+        check (Just r'') = envGetModWithFields r'' ns
+        has dec =
+          case dec of
+            Syntax.ModDec _ s2 ds | s1 == s2 ->
+              Just ((q ++ [(s1, tys)], [], ds) : r)
+            Syntax.NewDec _ ty2s s2 s3s _ | s1 == s2 ->
+              let q' = let f [] = error "envGetModWithFields"
+                           f [s3] = [(s3, ty2s)]
+                           f (s3:s3s) = (s3, []) : f s3s
+                        in f s3s
+               in Just (envGetUnit r q' (q ++ [(s1, tys)]))
+            _ ->
+              Nothing
+
+envGetModWithName :: Env -> Name -> Env
+envGetModWithName [] _ = error "envGetModWithName"
+envGetModWithName (r@((q, _, ds):r')) (s1, tys) = check $ search has ds
+  where check Nothing = envGetModWithName r' (s1, tys)
+        check (Just x) = x
+        has dec =
+          case dec of
+            Syntax.ModDec _ s2 ds | s1 == s2 ->
+              Just ((q ++ [(s1, [])] , [], ds) : r)
+            Syntax.SubDec _ s2 q2 | s1 == s2 ->
+              let q2' = map (\ s -> (s, [])) q2
+                  -- Note that r' is used because alias lookup starts at the outer level.
+               in Just (envGetMod r' q2')
+            _ ->
+              Nothing
+
+envGetFunWithName :: Env -> Name -> (Qual, Simple.Ident -> M ())
+envGetFunWithName [] _ = error "envGetFunWithName"
+envGetFunWithName (r@((q, _, ds):r')) (s1, tys) = check $ search has ds
+  where check Nothing = envGetFunWithName r' (s1, tys)
+        check (Just x) = x
+        has dec =
+          case dec of
+            Syntax.FunDec _ ty0s ty0 s2 ss ps _ t | s1 == s2 ->
+              let q' = q ++ [(s1, tys)]
+                  f d = do
+                    setEnv r
+                    t <- elaborateLambda ps undefined t
+                    ty0s <- mapM elaborateType ty0s
+                    ty0 <- elaborateType ty0
+                    ty <- return $ foldr Simple.ArrowType ty0 ty0s
+                    addFun d (Simple.Fun ty t)
+               in Just (q', f)
+            _ ->
+              Nothing
+
+elaborateLambda :: [Syntax.Pat] -> [Type.Type] -> Syntax.Term -> M Simple.Term
+elaborateLambda []     []       t = elaborateTerm t
+elaborateLambda (p:ps) (ty:tys) t = do
+  d <- gen
+  withPat d p $ do
+    t <- elaborateLambda ps tys t
+    ty <- elaborateType ty
+    return $ Simple.LambdaTerm d ty t
+elaborateLambda _ _ _ = error "elaborateLambda"
+
+elaborateType :: Type.Type -> M Simple.Type
+elaborateType ty =
+  case ty of
+    Type.Arrow ty1 ty2 -> do
+      ty1 <- elaborateType ty1
+      ty2 <- elaborateType ty2
+      return $ Simple.ArrowType ty1 ty2
+    Type.Metavariable _ ->
+      error "elaborateType"
+    Type.String ->
+      return $ Simple.StringType
+    Type.Tuple tys -> do
+      tys <- mapM elaborateType tys
+      return $ Simple.TupleType tys
+    Type.Unit ->
+       return $ Simple.UnitType
+    Type.Variable x -> do
+      ty <- getLowerType x
+      elaborateType ty
+    Type.Variant ss tys ->
+      let q = let f [] = error "elaborateType"
+                  f [s] = [(s, tys)]
+                  f (s:ss) = (s, []) : f ss
+               in f ss
+       in getVariantType q
+
+-- The path is fully resolved.
+getVariantType :: Full -> M Simple.Type
+getVariantType = undefined
+
+getLowerType :: String -> M Type.Type
+getLowerType = undefined
+
+-- This only works for singleton constructors.
+withPat :: Simple.Ident -> Syntax.Pat -> M Simple.Term -> M Simple.Term
+withPat d pat  m=
+  case pat of
+    Syntax.AscribePat _ p _ ->
+      withPat d p m
+    Syntax.LowerPat _ s ->
+      withLowerBind s d m
+    Syntax.TuplePat _ _ ps -> do
+      ds <- mapM (const gen) ps
+      t <- withPats ds ps m
+      return $ Simple.UntupleTerm ds (Simple.VariableTerm d) t
+    Syntax.UnderbarPat ->
+      m
+    Syntax.UnitPat _ ->
+      m
+    Syntax.UpperPat _ _ _ _ ps -> do
+      ds <- mapM (const gen) ps
+      t <- withPats ds ps m
+      return $ Simple.CaseTerm (Simple.VariableTerm d) [(ds, t)]
+
+withPats :: [Simple.Ident] -> [Syntax.Pat] -> M Simple.Term -> M Simple.Term
+withPats [] [] m = m
+withPats (d:ds) (p:ps) m = withPat d p (withPats ds ps m)
+withPats _ _ _ = error "withPats"
+
+-- This does not, from what I can see, require a type.
+withLowerBind :: String -> Simple.Ident -> M Simple.Term -> M Simple.Term
+withLowerBind = undefined
+
+elaborateTerm :: Syntax.Term -> M Simple.Term
+elaborateTerm t =
+  case t of
+    Syntax.CaseTerm _ t rs -> do
+      t <- elaborateTerm t
+      elaborateCase t rs
+    _ -> undefined
+
+elaborateCase :: Simple.Term -> [Syntax.Rule] -> M Simple.Term
+elaborateCase t1 [] = error "elaborateCase"
+elaborateCase t1 [(p, t2)] = elaborateBind p t1 (elaborateTerm t2)
+elaborateCase t1 rs = undefined
+
+elaborateBind :: Syntax.Pat -> Simple.Term -> M Simple.Term -> M Simple.Term
+elaborateBind = undefined
+
+addFun :: Simple.Ident -> Simple.Fun -> M ()
+addFun = undefined
+
+search :: (a -> Maybe b) -> [a] -> Maybe b
+search f [] = Nothing
+search f (x:xs) = maybe (search f xs) Just (f x)
+
+{-
 type M a = [a]
 
 data Path = Path Name [Field]
@@ -147,6 +462,8 @@ envGetPairWithFields r []     = unreachable "envGetPairWithFields"
 envGetPairWithFields r [x]    = (r, x)
 envGetPairWithFields r (x:xs) = envGetPairWithFields (envGetEnvWithField r x) xs
 
+-}
+
 {-
 
 -- Looks up the internal module name and returns the environment.
@@ -194,6 +511,7 @@ envPath ((s, _) : r) = (s, []) : envPath r
 
 -}
 
+{-
 -- This simply converts Syntax.Qual to Qual.
 tempFix :: Syntax.Qual -> [Simple.Type] -> Path
 tempFix [] tys     = unreachable "tempFix"
@@ -211,27 +529,11 @@ elaborateType = undefined
 elaborateRules :: Simple.Type -> Simple.Term -> [(Syntax.Pat, M Simple.Term)] -> M Simple.Term
 elaborateRules = undefined
 
-elaborateLambda :: [Syntax.Pat] -> Syntax.Term -> M Simple.Term
-elaborateLambda = undefined
-
-getEnv :: M Env
-getEnv = undefined
-
-gen :: M Simple.Ident
-gen = undefined
-
 getLower :: String -> M Simple.Ident
 getLower = undefined
+-}
 
 {-
-elaborate :: Syntax.Program -> Simple.Program
-elaborate p = run p $ do
-  d <- getFun [("Main", [])]
-  finish
-  x1 <- getProgramTags
-  x2 <- getProgramSums
-  x3 <- getProgramFuns
-  return $ Simple.Program x1 x2 x3 d
 
 type Qual = [(String, [Simple.Type])]
 
@@ -340,30 +642,6 @@ getVariantType = undefined
 
 elaborateLambda :: [Syntax.Pat] -> Syntax.Term -> M Simple.Term
 elaborateLambda = undefined
-
-getProgramTags :: M (Simple.IdentMap Simple.Tag)
-getProgramTags = undefined
-
-getProgramSums :: M (Simple.IdentMap Simple.Sum)
-getProgramSums = undefined
-
-getProgramFuns :: M (Simple.IdentMap Simple.Fun)
-getProgramFuns = undefined
-
-run :: Syntax.Program -> M Simple.Program -> Simple.Program
-run = undefined
-
-getExportedFuns :: M (Map Qual (Int, Maybe ()))
-getExportedFuns = undefined
-
-setExportedFuns :: Map Qual (Int, Maybe ()) -> M ()
-setExportedFuns = undefined
-
-gen :: M Simple.Ident
-gen = undefined
-
-withLowerBind :: Simple.Ident -> String -> M Simple.Term -> M Simple.Term
-withLowerBind = undefined
 
 -- Get the identifier for a lower-case variable.
 getLower :: String -> M Simple.Ident
@@ -494,6 +772,7 @@ envPop :: Env -> Env
 envPop = tail
 -}
 
+{-
 unreachable :: String -> a
 unreachable = error . ("unreachable: " ++)
 
@@ -505,3 +784,4 @@ dropLast (x:xs) = x : dropLast xs
 search :: (a -> Maybe b) -> [a] -> Maybe b
 search f [] = Nothing
 search f (x:xs) = maybe (search f xs) Just (f x)
+-}

@@ -214,12 +214,12 @@ gatherProgram :: Program -> Env
 gatherProgram (Program ds) = foldl (gatherDec [] []) builtinEnv ds
 
 gatherDec :: [String] -> [Env] -> Env -> Dec -> Env
-gatherDec l rs r (FunDec _ s ss ps ty _) = envWithFunction r s (ss, funType ps ty)
-gatherDec l rs r (ModDec _ s ds)         = envWithModule r s $ foldl (gatherDec (s:l) (r:rs)) emptyEnv ds
-gatherDec l rs r (NewDec _ s q tys)      = envWithModule r s $ unitApply q (s:l) (envStackLookupUnit (r:rs) q) (map convertType tys)
-gatherDec l rs r (SumDec _ s ss cs)      = foldl (gatherConstructor (reverse (s:l)) ss) r cs
-gatherDec l rs r (UnitDec _ s ss ds)     = envWithUnit r s (ss, foldl (gatherDec (s:l) (r:rs)) emptyEnv ds)
-gatherDec l rs r (SubDec _ s q)          = envWithSubstitution r s q
+gatherDec l rs r (FunDec _ _ _ s ss ps ty _) = envWithFunction r s (ss, funType ps ty)
+gatherDec l rs r (ModDec _ s ds)             = envWithModule r s $ foldl (gatherDec (s:l) (r:rs)) emptyEnv ds
+gatherDec l rs r (NewDec _ _ s q tys)        = envWithModule r s $ unitApply q (s:l) (envStackLookupUnit (r:rs) q) (map convertType tys)
+gatherDec l rs r (SumDec _ s ss cs)          = foldl (gatherConstructor (reverse (s:l)) ss) r cs
+gatherDec l rs r (UnitDec _ s ss ds)         = envWithUnit r s (ss, foldl (gatherDec (s:l) (r:rs)) emptyEnv ds)
+gatherDec l rs r (SubDec _ s q)              = envWithSubstitution r s q
 
 gatherConstructor :: [String] -> [String] -> Env -> (Pos, String, [Typ]) -> Env
 gatherConstructor q ss r (_, s, tys) =
@@ -274,12 +274,12 @@ convertProgram :: Env -> Program -> Program
 convertProgram r (Program ds) = Program (map (convertDec [r]) ds)
 
 convertDec :: [Env] -> Dec -> Dec
-convertDec rs (UnitDec pos s ss ds)     = UnitDec pos s ss (map (convertDec (snd (envStackLookupUnit rs [s]) : rs)) ds)
-convertDec rs (ModDec pos s ds)         = ModDec pos s (map (convertDec (envStackLookupMod rs [s] : rs)) ds)
-convertDec rs (NewDec pos s q tys)      = NewDec pos s q tys
-convertDec rs (FunDec pos s ss ps ty t) = FunDec pos s ss ps ty (runM (convertTerm t) const rs 0)
-convertDec rs (SumDec pos s ss cs)      = SumDec pos s ss cs
-convertDec rs (SubDec pos s q)          = SubDec pos s q
+convertDec rs (UnitDec pos s ss ds)         = UnitDec pos s ss (map (convertDec (snd (envStackLookupUnit rs [s]) : rs)) ds)
+convertDec rs (ModDec pos s ds)             = ModDec pos s (map (convertDec (envStackLookupMod rs [s] : rs)) ds)
+convertDec rs (NewDec pos _ s q tys)        = NewDec pos (map convertType tys) s q tys
+convertDec rs (FunDec pos _ _ s ss ps ty t) = FunDec pos undefined undefined s ss ps ty (runM (convertTerm t) const rs 0)
+convertDec rs (SumDec pos s ss cs)          = SumDec pos s ss cs
+convertDec rs (SubDec pos s q)              = SubDec pos s q
 
 data M a = M { runM :: forall b. (a -> Int -> b) -> [Env] -> Int -> b }
 

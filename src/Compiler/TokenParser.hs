@@ -263,7 +263,7 @@ funDec = do
   e4 <- typ0
   e5 <- withPatsLocals e3 $
           indented (c + 2) stm0
-  return $ Syntax.FunDec pos e1 e2 e3 e4 e5
+  return $ Syntax.FunDec pos [] Type.Unit e1 e2 e3 e4 e5
 
 stm0 :: AmbiguousParser Syntax.Term
 stm0 = do
@@ -535,7 +535,7 @@ newDec = do
   e3 <- choice [ typArguments
                , return []
                ]
-  return $ Syntax.NewDec pos e1 e2 e3
+  return $ Syntax.NewDec pos [] e1 e2 e3
 
 unitDec :: AmbiguousParser Syntax.Dec
 unitDec = do

@@ -39,20 +39,20 @@ inferDec :: Syntax.Dec -> Either String Syntax.Dec
 inferDec (Syntax.SumDec pos s ss rs) =
   Right $ Syntax.SumDec pos s ss rs
 
-inferDec (Syntax.FunDec pos s ss ps ty t) = do
+-- ty0s and ty0 have been converted in Meta.
+inferDec (Syntax.FunDec pos ty0s ty0 s ss ps ty t) = do
   case inferTerm g sigmaEmpty (Syntax.typType ty) t of
     Left msg -> Left msg
-    Right t -> Right $ Syntax.FunDec pos s ss ps ty t
-  where g = either (\ _ -> error "impossible") id $ gammaWithPats g sigmaEmpty ps tys'
-        tys' = map Syntax.patType ps
+    Right t -> Right $ Syntax.FunDec pos ty0s ty0 s ss ps ty t
+  where g = either (\ _ -> error "impossible") id $ gammaWithPats g sigmaEmpty ps ty0s
 
 inferDec (Syntax.ModDec pos s ds) =
   case inferDecs ds of
     Left msg -> Left msg
     Right ds -> Right $ Syntax.ModDec pos s ds
 
-inferDec (Syntax.NewDec pos s1 s2 tys) =
-  Right $ Syntax.NewDec pos s1 s2 tys
+inferDec (Syntax.NewDec pos tys' s1 s2 tys) =
+  Right $ Syntax.NewDec pos tys' s1 s2 tys
 
 inferDec (Syntax.UnitDec pos s tys ds) =
   case inferDecs ds of

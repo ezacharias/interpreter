@@ -41,14 +41,14 @@ data Dec = FunDec Pos String [String] [Pat] Typ Term
 
 checkDec :: Env -> Dec -> M ()
 
-checkDec r (FunDec p s _ _ _ _) = todo
+checkDec r (FunDec p _ _ s _ _ _ _) = todo
 
 checkDec r (ModDec _ s ds) = todo -- mapM_ (checkDec (envGetMod r s)) ds
 
 -- We need to check that the unit is bound and that the type arity is correct.
 -- Some of this may have been done during gather.
 
-checkDec r (NewDec _ s q ts) = todo
+checkDec r (NewDec _ _ s q ts) = todo
 
 -- We simply need to check that the qualified name is bound. We may have already
 -- done this when gathering the environment.

@@ -11,7 +11,7 @@ data Type = Arrow Type Type
           | Unit
           | Variable String
           | Variant [String] [Type]
- deriving (Eq, Show)
+ deriving (Eq, Ord, Show)
 
 rename :: [(String, Type)] -> Type -> Type
 rename r (Arrow t1 t2)    = Arrow (rename r t1) (rename r t2)
