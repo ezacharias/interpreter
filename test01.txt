@@ -1,3 +1,5 @@
--- The minimial program.
-Main() : Output
-  Exit
+The minimial program.
+
+
+    Main : Output
+      Exit

@@ -1,11 +1,182 @@
 module Compiler.Meta where
 
-import           Data.Maybe      (fromMaybe)
-
-import           Compiler.Syntax
+import qualified Compiler.Syntax as Syntax
 import qualified Compiler.Type   as Type
 
+addMetavariables :: Syntax.Program -> Syntax.Program
+addMetavariables p = convertProgram (programEnv p) p
 
+-- An environment is the full path and the declarations.
+type Env = [(Full, [Syntax.Dec])]
+type Full = Qual
+type Qual = [(String, [Type.Type])]
+type Name = (String, [Type.Type])
+type Field = (String, [Type.Type])
+
+convertProgram ::  Env -> Syntax.Program -> Syntax.Program
+convertProgram r (Syntax.Program ds) = Syntax.Program (map (convertDec r) ds)
+
+convertDec :: Env -> Syntax.Dec -> Syntax.Dec
+convertDec r t =
+  case t of
+    Syntax.FunDec pos _ _ s ss ps ty t -> run r $ do
+      tys' <- mapM getPatType ps
+      ty' <- getTypeType ty
+      t' <- convertTerm t
+      return $ Syntax.FunDec pos tys' ty' s ss ps ty t'
+    Syntax.ModDec pos s ds ->
+      Syntax.ModDec pos s (map (convertDec ((envFull r ++ [(s, [])], ds) : r)) ds)
+    Syntax.NewDec pos _ s q tys ->
+      Syntax.NewDec pos (map (envTypeType r) tys) s q tys
+    Syntax.SubDec pos s q ->
+      Syntax.SubDec pos s q
+    Syntax.SumDec pos s ss cs ->
+      Syntax.SumDec pos s ss cs
+    Syntax.UnitDec pos s ss ds ->
+      Syntax.UnitDec pos s ss (map (convertDec ((envFull r ++ [(s, map Type.Variable ss)], ds) : r)) ds)
+
+envFull :: Env -> Full
+envFull [] = error "envFull"
+envFull ((q, _) : _) = q
+
+convertTerm :: Syntax.Term -> M Syntax.Term
+convertTerm = undefined
+
+run :: Env -> M Syntax.Dec -> Syntax.Dec
+run = undefined
+
+getPatType :: Syntax.Pat -> M Type.Type
+getPatType p = do
+  r <- getEnv
+  return $ envPatType r p
+
+getTypeType :: Syntax.Typ -> M Type.Type
+getTypeType ty = do
+  r <- getEnv
+  return $ envTypeType r ty
+
+-- For now constructor patterns in function declarations must have ascriptions.
+envPatType :: Env -> Syntax.Pat -> Type.Type
+envPatType r p =
+  case p of
+    Syntax.AscribePat _ p ty -> envTypeType r ty
+    Syntax.LowerPat _ x -> error "envPatType"
+    Syntax.TuplePat _ _ ps -> Type.Tuple (map (envPatType r) ps)
+    Syntax.UnderbarPat -> error "envPatType"
+    Syntax.UnitPat _ -> Type.Unit
+    Syntax.UpperPat _ _ _ q ps -> error "envPatType"
+
+-- I think we never need to look up type variables, but I am
+-- not completely sure.
+envTypeType :: Env -> Syntax.Typ -> Type.Type
+envTypeType r ty =
+  case ty of
+    Syntax.ArrowTyp ty1 ty2 -> Type.Arrow (envTypeType r ty1) (envTypeType r ty2)
+    Syntax.LowerTyp x -> Type.Variable x -- not sure about this
+    Syntax.TupleTyp tys -> Type.Tuple (map (envTypeType r) tys)
+    Syntax.UnitTyp _ -> Type.Unit
+    Syntax.UpperTyp _ q tys -> envGetType r (createQual q (map (envTypeType r) tys))
+
+createQual :: [String] -> [Type.Type] -> Qual
+createQual [s] tys = [(s, tys)]
+createQual (s:ss) tys = (s, []) : createQual ss tys
+createQual _ _ = error "createQual"
+
+createVariant :: Full -> Type.Type
+createVariant xs = Type.Variant (map fst xs) (snd (last xs))
+
+-- Lookup a variant type with the path in the environment.
+envGetType :: Env -> Qual -> Type.Type
+envGetType r [] = error "envGetType"
+envGetType r [n] = envGetTypeWithName r n
+envGetType r (n:ns) = envGetTypeWithFields (envGetModWithName r n) ns
+
+envGetTypeWithName :: Env -> Name -> Type.Type
+envGetTypeWithName [] _ = error "envGetTypeWithName"
+envGetTypeWithName (r@((q, ds):r')) (s1, tys) = check $ search has ds
+  where check Nothing = envGetTypeWithName r' (s1, tys)
+        check (Just x) = x
+        has dec =
+          case dec of
+            Syntax.SumDec _ s2 ss _ | s1 == s2 ->
+              Just (createVariant (q ++ [(s1, tys)]))
+            _ ->
+              Nothing
+
+envGetModWithName :: Env -> Name -> Env
+envGetModWithName [] _ = error "envGetModWithName"
+envGetModWithName (r@((q, ds):r')) (s1, tys) = check $ search has ds
+  where check Nothing = envGetModWithName r' (s1, tys)
+        check (Just x) = x
+        has dec =
+          case dec of
+            Syntax.ModDec _ s2 ds | s1 == s2 ->
+              Just ((q ++ [(s1, tys)], ds) : r)
+            Syntax.SubDec _ s2 q2 | s1 == s2 ->
+              Just (envGetMod r' (createQual q2 []))
+            _ ->
+              Nothing
+
+envGetTypeWithFields :: Env -> Qual -> Type.Type
+envGetTypeWithFields [] _ = error "envGetTypeWithFields"
+envGetTypeWithFields _ [] = error "envGetTypeWithFields"
+envGetTypeWithFields (r@((q, ds):r')) [(s1, tys)] = check $ search has ds
+  where check Nothing = error "envGetTypeWithFields"
+        check (Just x) = x
+        has dec =
+          case dec of
+            Syntax.SumDec _ s2 ss _ | s1 == s2 ->
+              Just (createVariant (q ++ [(s1, tys)]))
+            _ ->
+              Nothing
+envGetTypeWithFields (r@((q, ds):r')) ((s1, tys):ns) = check $ search has ds
+  where check Nothing = error "envGetTypeWithFields"
+        check (Just r'') = envGetTypeWithFields r'' ns
+        has dec =
+          case dec of
+            Syntax.ModDec _ s2 ds | s1 == s2 ->
+              Just ((q ++ [(s1, tys)], ds) : r)
+            Syntax.SubDec _ s2 q2 | s1 == s2 ->
+              Just (envGetMod r' (createQual q2 []))
+            _ ->
+              Nothing
+
+envGetMod :: Env -> Qual -> Env
+envGetMod r [] = error "envGetMod"
+envGetMod r (n:ns) = envGetModWithFields (envGetModWithName r n) ns
+
+envGetModWithFields :: Env -> Qual -> Env
+envGetModWithFields [] _ = error "envGetModWithFields"
+envGetModWithFields r [] = r
+envGetModWithFields (r@((q, ds):r')) ((s1, tys):ns) = check $ search has ds
+  where check Nothing = error "envGetModWithFields"
+        check (Just r'') = envGetModWithFields r'' ns
+        has dec =
+          case dec of
+            Syntax.ModDec _ s2 ds | s1 == s2 ->
+              Just ((q ++ [(s1, tys)], ds) : r)
+            Syntax.SubDec _ s2 q2 | s1 == s2 ->
+              Just (envGetMod r' (createQual q2 []))
+            _ ->
+              Nothing
+
+type M a = [a]
+
+getEnv :: M Env
+getEnv = undefined
+
+programEnv :: Syntax.Program -> Env
+programEnv (Syntax.Program ds) = [([] , ds)]
+
+search :: (a -> Maybe b) -> [a] -> Maybe b
+search f [] = Nothing
+search f (x:xs) = maybe (search f xs) Just (f x)
+
+
+
+
+
+{-
 addMetavariables :: Program -> Program
 addMetavariables p = convertProgram (gatherProgram p) p
 
@@ -392,3 +563,4 @@ convertType (TupleTyp tys)     = Type.Tuple (map convertType tys)
 convertType (UnitTyp _)        = Type.Unit
 convertType (UpperTyp _ ["String"] _) = Type.String -- fix this
 convertType (UpperTyp _ q tys) = Type.Variant q (map convertType tys)
+-}
