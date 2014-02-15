@@ -10,7 +10,13 @@ data Type = Arrow Type Type
           | Tuple { tupleElems :: [Type] }
           | Unit
           | Variable String
-          | Variant [String] [Type]
+          | Variant Path
+ deriving (Eq, Ord, Show)
+
+data Name = Name String [Type]
+ deriving (Eq, Ord, Show)
+
+data Path = Path { pathNames :: [Name] }
  deriving (Eq, Ord, Show)
 
 rename :: [(String, Type)] -> Type -> Type
@@ -20,7 +26,7 @@ rename r String           = String
 rename r (Tuple ts)       = Tuple (map (rename r) ts)
 rename r Unit             = Unit
 rename r (Variable s)     = maybe (Variable s) id (lookup s r)
-rename r (Variant s ts)   = Variant s (map (rename r) ts)
+rename r (Variant q)      = Variant (Path (map (\ (Name s tys) -> Name s (map (rename r) tys)) (pathNames q)))
 
 replace :: Metavariable -> Type -> Type -> Type
 replace x t (Arrow t1 t2)    = Arrow (replace x t t1) (replace x t t2)
@@ -31,4 +37,4 @@ replace x t String           = String
 replace x t (Tuple ts)       = Tuple (map (replace x t) ts)
 replace x t Unit             = Unit
 replace x t (Variable s)     = Variable s
-replace x t (Variant s ts)   = Variant s (map (replace x t) ts)
+replace x t (Variant q)      = Variant (Path (map (\ (Name s tys) -> Name s (map (replace x t) tys)) (pathNames q)))

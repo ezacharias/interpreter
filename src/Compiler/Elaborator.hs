@@ -259,15 +259,11 @@ elaborateType ty =
     Type.Variable x -> do
       ty <- getLowerType x
       elaborateType ty
-    Type.Variant ss tys ->
-      let q = let f [] = error "elaborateType"
-                  f [s] = [(s, tys)]
-                  f (s:ss) = (s, []) : f ss
-               in f ss
-       in getVariantType q
+    Type.Variant q ->
+       getVariantType q
 
 -- The path is fully resolved.
-getVariantType :: Full -> M Simple.Type
+getVariantType :: Type.Path -> M Simple.Type
 getVariantType = undefined
 
 getLowerType :: String -> M Type.Type

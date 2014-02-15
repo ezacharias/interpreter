@@ -144,7 +144,7 @@ concreteType s Type.String           = Type.String
 concreteType s (Type.Tuple ts)       = Type.Tuple (map (concreteType s) ts)
 concreteType s Type.Unit             = Type.Unit
 concreteType s (Type.Variable x)     = Type.Variable x
-concreteType s (Type.Variant x ts)   = Type.Variant x (map (concreteType s) ts)
+concreteType s (Type.Variant q)      = Type.Variant (Type.Path (map (\ (Type.Name x tys) -> Type.Name x (map (concreteType s) tys)) (Type.pathNames q)))
 
 
 isConcreteType :: Type.Type -> Bool
@@ -155,8 +155,7 @@ isConcreteType Type.String           = True
 isConcreteType (Type.Tuple ts)       = all isConcreteType ts
 isConcreteType Type.Unit             = True
 isConcreteType (Type.Variable x)     = True
-isConcreteType (Type.Variant x ts)   = all isConcreteType ts
-
+isConcreteType (Type.Variant q)      = all (\ (Type.Name x tys) -> all isConcreteType tys) (Type.pathNames q)
 
 
 -- Replaces any metavariables found in sigma. If the metavariable is not in
@@ -170,7 +169,7 @@ updateType s Type.String           = Type.String
 updateType s (Type.Tuple ts)       = Type.Tuple (map (updateType s) ts)
 updateType s Type.Unit             = Type.Unit
 updateType s (Type.Variable x)     = Type.Variable x
-updateType s (Type.Variant x ts)   = Type.Variant x (map (updateType s) ts)
+updateType s (Type.Variant q)      = Type.Variant (Type.Path (map (\ (Type.Name x tys) -> Type.Name x (map (updateType s) tys)) (Type.pathNames q)))
 
 
 typeCheckPat :: Sigma -> Type.Type -> Syntax.Pat -> Either String Sigma
@@ -364,12 +363,20 @@ showType r Type.Unit = ("()", r)
 
 showType r (Type.Variable x) = (x, r)
 
-showType r (Type.Variant s []) = (showQual s, r)
+showType r (Type.Variant q)  = showPath r q
 
-showType r (Type.Variant s ts) =
-  let (ss, r') = showTypes r ts
-   in (showQual s ++ "⟦" ++ concat (intersperse ", " ss) ++ "⟧", r')
+showPath :: [Type.Metavariable] -> Type.Path -> (String, [Type.Metavariable])
+showPath r (Type.Path [])     = error "showPath"
+showPath r (Type.Path (n:ns)) = foldl f (showName r n) ns -- intersperse "." (map (showName r) (pathNames q))
+  where f (s1, r) n = let (s2, r') = showName r n
+                       in (s1 ++ "." ++ s2, r')
 
+showName :: [Type.Metavariable] -> Type.Name -> (String, [Type.Metavariable])
+showName r (Type.Name s1 [])       = (s1, r)
+showName r (Type.Name s1 (ty:tys)) = let (s2, r') = foldl f (showType r ty) tys
+                                      in (s1 ++ "⟦" ++ s2 ++ "⟧", r')
+  where f (s2, r) ty = let (s3, r') = showType r ty
+                        in (s2 ++ ", " ++ s3, r')
 
 showTypes :: [Type.Metavariable] -> [Type.Type] -> ([String], [Type.Metavariable])
 
@@ -426,9 +433,9 @@ unify s Type.Unit Type.Unit =
 unify s (Type.Variable x1) (Type.Variable x2) | x1 == x2 =
   return (Type.Variable x1, s)
 
-unify s (Type.Variant x1 t1s) (Type.Variant x2 t2s) | x1 == x2 = do
-  (t3s, s) <- unifys s t1s t2s
-  return (Type.Variant x1 t3s, s)
+unify s (Type.Variant q1) (Type.Variant q2) = do
+  (q3, s) <- unifyPath s q1 q2
+  return (Type.Variant q3, s)
 
 unify s _ _ = mzero
 
@@ -443,6 +450,34 @@ unifys s (t1:t1s) (t2:t2s) = do
   return (t3:t3s, s)
 
 unifys s _ _ = mzero
+
+
+unifyPath :: MonadPlus m => Sigma -> Type.Path -> Type.Path -> m (Type.Path, Sigma)
+
+unifyPath s (Type.Path n1s) (Type.Path n2s) = do
+  (n3s, s) <- unifyNames s n1s n2s
+  return (Type.Path n3s, s)
+
+
+unifyNames :: MonadPlus m => Sigma -> [Type.Name] -> [Type.Name] -> m ([Type.Name], Sigma)
+
+unifyNames s [] [] = return ([], s)
+
+unifyNames s (n1:n1s) (n2:n2s) = do
+  (n3, s) <- unifyName s n1 n2
+  (n3s, s) <- unifyNames s n1s n2s
+  return (n3:n3s, s)
+
+unifyNames s _ _ = mzero
+
+
+unifyName :: MonadPlus m => Sigma -> Type.Name -> Type.Name -> m (Type.Name, Sigma)
+
+unifyName s (Type.Name x1 ty1s) (Type.Name x2 ty2s) | x1 == x2 = do
+  (ty3s, s) <- unifys s ty1s ty2s
+  return (Type.Name x1 ty3s, s)
+
+unifyName _ _ _ = mzero
 
 
 -- Table from metavariables to types.

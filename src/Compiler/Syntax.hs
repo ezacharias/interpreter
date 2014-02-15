@@ -56,8 +56,14 @@ funType []     t = typType t
 funType (p:ps) t = Type.Arrow (patType p) (funType ps t)
 
 constructorType :: [Typ] -> [String] -> [String] -> Type.Type
-constructorType []       q ss = Type.Variant q (map Type.Variable ss)
+constructorType []       q ss = Type.Variant (createPath q (map Type.Variable ss))
 constructorType (ty:tys) q ss = Type.Arrow (typType ty) (constructorType tys q ss)
+
+createPath :: [String] -> [Type.Type] -> Type.Path
+createPath ss tys = Type.Path (f ss)
+  where f [] = error "createPath"
+        f [s] = [Type.Name s tys]
+        f (s:ss) = Type.Name s [] : f ss
 
 patType :: Pat -> Type.Type
 patType (AscribePat _ p ty) = typType ty -- not sure about this
@@ -68,9 +74,9 @@ patType (UnitPat _)       = Type.Unit
 patType (UpperPat _ _ _ _ _) = undefined
 
 typType :: Typ -> Type.Type
-typType (ArrowTyp ty1 ty2) = Type.Arrow (typType ty1) (typType ty2)
-typType (LowerTyp s)       = Type.Variable s
-typType (TupleTyp tys)     = Type.Tuple (map typType tys)
-typType (UnitTyp _)        = Type.Unit
+typType (ArrowTyp ty1 ty2)  = Type.Arrow (typType ty1) (typType ty2)
+typType (LowerTyp s)        = Type.Variable s
+typType (TupleTyp tys)      = Type.Tuple (map typType tys)
+typType (UnitTyp _)         = Type.Unit
 typType (UpperTyp _ ["String"] tys) = Type.String -- fix this
-typType (UpperTyp _ s tys) = Type.Variant s (map typType tys)
+typType (UpperTyp _ ss tys) = Type.Variant (createPath ss (map typType tys))

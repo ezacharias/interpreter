@@ -83,7 +83,8 @@ createQual (s:ss) tys = (s, []) : createQual ss tys
 createQual _ _ = error "createQual"
 
 createVariant :: Full -> Type.Type
-createVariant xs = Type.Variant (map fst xs) (snd (last xs))
+createVariant xs = Type.Variant (Type.Path (map f xs))
+  where f (s, tys) = Type.Name s tys
 
 -- Lookup a variant type with the path in the environment.
 envGetType :: Env -> Qual -> Type.Type
