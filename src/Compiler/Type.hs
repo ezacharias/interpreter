@@ -19,6 +19,12 @@ data Name = Name String [Type]
 data Path = Path { pathNames :: [Name] }
  deriving (Eq, Ord, Show)
 
+pathAddName :: Path -> Name -> Path
+pathAddName (Path ns) n = Path (ns ++ [n])
+
+nameAddPath :: Name -> Path -> Path
+nameAddPath n (Path ns) = Path (n : ns)
+
 rename :: [(String, Type)] -> Type -> Type
 rename r (Arrow t1 t2)    = Arrow (rename r t1) (rename r t2)
 rename r (Metavariable n) = Metavariable n

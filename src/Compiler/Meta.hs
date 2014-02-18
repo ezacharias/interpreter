@@ -7,11 +7,7 @@ addMetavariables :: Syntax.Program -> Syntax.Program
 addMetavariables p = convertProgram (programEnv p) p
 
 -- An environment is the full path and the declarations.
-type Env = [(Full, [Syntax.Dec])]
-type Full = Qual
-type Qual = [(String, [Type.Type])]
-type Name = (String, [Type.Type])
-type Field = (String, [Type.Type])
+type Env = [(Type.Path, [Syntax.Dec])]
 
 convertProgram ::  Env -> Syntax.Program -> Syntax.Program
 convertProgram r (Syntax.Program ds) = Syntax.Program (map (convertDec r) ds)
@@ -25,7 +21,7 @@ convertDec r t =
       t' <- convertTerm t
       return $ Syntax.FunDec pos tys' ty' s ss ps ty t'
     Syntax.ModDec pos s ds ->
-      Syntax.ModDec pos s (map (convertDec ((envFull r ++ [(s, [])], ds) : r)) ds)
+      Syntax.ModDec pos s (map (convertDec ((Type.pathAddName (envFull r) (Type.Name s []), ds) : r)) ds)
     Syntax.NewDec pos _ s q tys ->
       Syntax.NewDec pos (map (envTypeType r) tys) s q tys
     Syntax.SubDec pos s q ->
@@ -33,17 +29,32 @@ convertDec r t =
     Syntax.SumDec pos s ss cs ->
       Syntax.SumDec pos s ss cs
     Syntax.UnitDec pos s ss ds ->
-      Syntax.UnitDec pos s ss (map (convertDec ((envFull r ++ [(s, map Type.Variable ss)], ds) : r)) ds)
+      Syntax.UnitDec pos s ss (map (convertDec ((Type.pathAddName (envFull r) (Type.Name s (map Type.Variable ss)), ds) : r)) ds)
 
-envFull :: Env -> Full
-envFull [] = error "envFull"
+envFull :: Env -> Type.Path
+envFull [] = unreachable "envFull"
 envFull ((q, _) : _) = q
 
 convertTerm :: Syntax.Term -> M Syntax.Term
-convertTerm = undefined
+convertTerm t =
+  case t of
+    Syntax.UpperTerm pos _ _ s tas -> do
+      (ss, ty) <- lookupFunction s
+      ts' <- case tas of
+        Nothing -> mapM (const gen) ss
+        Just tas -> return $ map convertType tas
+      let ty' = Type.rename (zip ss ts') ty
+      return $ Syntax.UpperTerm pos ts' ty' s tas
+    t ->
+      todo $ "convertTerm: " ++ show t
 
-run :: Env -> M Syntax.Dec -> Syntax.Dec
-run = undefined
+-- Returns the type paramaters and the full type of the function.
+lookupFunction :: Syntax.Qual -> M ([String], Type.Type)
+lookupFunction ["Exit"] = return ([], Type.Variant (Type.Path [Type.Name "Output" []]))
+lookupFunction q = return $ (todo "lookupFunction", todo "lookupFunction")
+
+convertType :: Syntax.Typ -> Type.Type
+convertType = todo "convertType"
 
 getPatType :: Syntax.Pat -> M Type.Type
 getPatType p = do
@@ -60,11 +71,11 @@ envPatType :: Env -> Syntax.Pat -> Type.Type
 envPatType r p =
   case p of
     Syntax.AscribePat _ p ty -> envTypeType r ty
-    Syntax.LowerPat _ x -> error "envPatType"
+    Syntax.LowerPat _ x -> unreachable "envPatType"
     Syntax.TuplePat _ _ ps -> Type.Tuple (map (envPatType r) ps)
-    Syntax.UnderbarPat -> error "envPatType"
+    Syntax.UnderbarPat -> unreachable "envPatType"
     Syntax.UnitPat _ -> Type.Unit
-    Syntax.UpperPat _ _ _ q ps -> error "envPatType"
+    Syntax.UpperPat _ _ _ q ps -> unreachable "envPatType"
 
 -- I think we never need to look up type variables, but I am
 -- not completely sure.
@@ -77,104 +88,115 @@ envTypeType r ty =
     Syntax.UnitTyp _ -> Type.Unit
     Syntax.UpperTyp _ q tys -> envGetType r (createQual q (map (envTypeType r) tys))
 
-createQual :: [String] -> [Type.Type] -> Qual
-createQual [s] tys = [(s, tys)]
-createQual (s:ss) tys = (s, []) : createQual ss tys
-createQual _ _ = error "createQual"
-
-createVariant :: Full -> Type.Type
-createVariant xs = Type.Variant (Type.Path (map f xs))
-  where f (s, tys) = Type.Name s tys
+createQual :: [String] -> [Type.Type] -> Type.Path
+createQual [s] tys = Type.Path [Type.Name s tys]
+createQual (s:ss) tys = Type.nameAddPath (Type.Name s []) (createQual ss tys)
+createQual _ _ = unreachable "createQual"
 
 -- Lookup a variant type with the path in the environment.
-envGetType :: Env -> Qual -> Type.Type
-envGetType r [] = error "envGetType"
-envGetType r [n] = envGetTypeWithName r n
-envGetType r (n:ns) = envGetTypeWithFields (envGetModWithName r n) ns
+envGetType :: Env -> Type.Path -> Type.Type
+envGetType r (Type.Path []) = unreachable "envGetType"
+envGetType r (Type.Path [n]) = envGetTypeWithName r n
+envGetType r (Type.Path (n:ns)) = envGetTypeWithFields (envGetModWithName r n) (Type.Path ns)
 
-envGetTypeWithName :: Env -> Name -> Type.Type
-envGetTypeWithName [] _ = error "envGetTypeWithName"
-envGetTypeWithName (r@((q, ds):r')) (s1, tys) = check $ search has ds
-  where check Nothing = envGetTypeWithName r' (s1, tys)
+envGetTypeWithName :: Env -> Type.Name -> Type.Type
+envGetTypeWithName [] x = unreachable $ "envGetTypeWithName: " ++ show x
+envGetTypeWithName _ (Type.Name "Output" []) = Type.Variant (Type.Path [Type.Name "Output" []])
+envGetTypeWithName (r@((q, ds):r')) (Type.Name s1 tys) = check $ search has ds
+  where check Nothing = envGetTypeWithName r' (Type.Name s1 tys)
         check (Just x) = x
         has dec =
           case dec of
             Syntax.SumDec _ s2 ss _ | s1 == s2 ->
-              Just (createVariant (q ++ [(s1, tys)]))
+              Just (Type.Variant (Type.pathAddName q (Type.Name s1 tys)))
             _ ->
               Nothing
 
-envGetModWithName :: Env -> Name -> Env
-envGetModWithName [] _ = error "envGetModWithName"
-envGetModWithName (r@((q, ds):r')) (s1, tys) = check $ search has ds
-  where check Nothing = envGetModWithName r' (s1, tys)
+envGetModWithName :: Env -> Type.Name -> Env
+envGetModWithName [] _ = unreachable "envGetModWithName"
+envGetModWithName (r@((q, ds):r')) (Type.Name s1 tys) = check $ search has ds
+  where check Nothing = envGetModWithName r' (Type.Name s1 tys)
         check (Just x) = x
         has dec =
           case dec of
             Syntax.ModDec _ s2 ds | s1 == s2 ->
-              Just ((q ++ [(s1, tys)], ds) : r)
+              Just ((Type.pathAddName q (Type.Name s1 tys), ds) : r)
             Syntax.SubDec _ s2 q2 | s1 == s2 ->
               Just (envGetMod r' (createQual q2 []))
             _ ->
               Nothing
 
-envGetTypeWithFields :: Env -> Qual -> Type.Type
-envGetTypeWithFields [] _ = error "envGetTypeWithFields"
-envGetTypeWithFields _ [] = error "envGetTypeWithFields"
-envGetTypeWithFields (r@((q, ds):r')) [(s1, tys)] = check $ search has ds
-  where check Nothing = error "envGetTypeWithFields"
+envGetTypeWithFields :: Env -> Type.Path -> Type.Type
+envGetTypeWithFields [] _ = unreachable "envGetTypeWithFields"
+envGetTypeWithFields _ (Type.Path []) = unreachable "envGetTypeWithFields"
+envGetTypeWithFields (r@((q, ds):r')) (Type.Path [Type.Name s1 tys]) = check $ search has ds
+  where check Nothing = unreachable "envGetTypeWithFields"
         check (Just x) = x
         has dec =
           case dec of
             Syntax.SumDec _ s2 ss _ | s1 == s2 ->
-              Just (createVariant (q ++ [(s1, tys)]))
+              Just (Type.Variant (Type.pathAddName q (Type.Name s1 tys)))
             _ ->
               Nothing
-envGetTypeWithFields (r@((q, ds):r')) ((s1, tys):ns) = check $ search has ds
-  where check Nothing = error "envGetTypeWithFields"
-        check (Just r'') = envGetTypeWithFields r'' ns
+envGetTypeWithFields (r@((q, ds):r')) (Type.Path ((Type.Name s1 tys):ns)) = check $ search has ds
+  where check Nothing = unreachable "envGetTypeWithFields"
+        check (Just r'') = envGetTypeWithFields r'' (Type.Path ns)
         has dec =
           case dec of
             Syntax.ModDec _ s2 ds | s1 == s2 ->
-              Just ((q ++ [(s1, tys)], ds) : r)
+              Just (((Type.pathAddName q (Type.Name s1 tys)), ds) : r)
             Syntax.SubDec _ s2 q2 | s1 == s2 ->
               Just (envGetMod r' (createQual q2 []))
             _ ->
               Nothing
 
-envGetMod :: Env -> Qual -> Env
-envGetMod r [] = error "envGetMod"
-envGetMod r (n:ns) = envGetModWithFields (envGetModWithName r n) ns
+envGetMod :: Env -> Type.Path -> Env
+envGetMod r (Type.Path []) = unreachable "envGetMod"
+envGetMod r (Type.Path (n:ns)) = envGetModWithFields (envGetModWithName r n) (Type.Path ns)
 
-envGetModWithFields :: Env -> Qual -> Env
-envGetModWithFields [] _ = error "envGetModWithFields"
-envGetModWithFields r [] = r
-envGetModWithFields (r@((q, ds):r')) ((s1, tys):ns) = check $ search has ds
-  where check Nothing = error "envGetModWithFields"
-        check (Just r'') = envGetModWithFields r'' ns
+envGetModWithFields :: Env -> Type.Path -> Env
+envGetModWithFields [] _ = unreachable "envGetModWithFields"
+envGetModWithFields r (Type.Path []) = r
+envGetModWithFields (r@((q, ds):r')) (Type.Path ((Type.Name s1 tys):ns)) = check $ search has ds
+  where check Nothing = unreachable "envGetModWithFields"
+        check (Just r'') = envGetModWithFields r'' (Type.Path ns)
         has dec =
           case dec of
             Syntax.ModDec _ s2 ds | s1 == s2 ->
-              Just ((q ++ [(s1, tys)], ds) : r)
+              Just ((Type.pathAddName q (Type.Name s1 tys), ds) : r)
             Syntax.SubDec _ s2 q2 | s1 == s2 ->
               Just (envGetMod r' (createQual q2 []))
             _ ->
               Nothing
 
-type M a = [a]
+run :: Env -> M Syntax.Dec -> Syntax.Dec
+run r m =  runM m r id
+
+newtype M a = M { runM :: Env -> (a -> Syntax.Dec) -> Syntax.Dec }
+
+instance Monad M where
+  return x = M (\ r k -> k x)
+  m >>= f = M (\ r k -> runM m r (\ x -> runM (f x) r k))
 
 getEnv :: M Env
-getEnv = undefined
+getEnv = M f
+  where f r k = k r
+
+gen :: M Type.Type
+gen = todo "gen"
 
 programEnv :: Syntax.Program -> Env
-programEnv (Syntax.Program ds) = [([] , ds)]
+programEnv (Syntax.Program ds) = [(Type.Path [] , ds)]
 
 search :: (a -> Maybe b) -> [a] -> Maybe b
 search f [] = Nothing
 search f (x:xs) = maybe (search f xs) Just (f x)
 
+todo :: String -> a
+todo s = error $ "todo: Meta." ++ s
 
-
+unreachable :: String -> a
+unreachable s = error $ "unreachable: Meta." ++ s
 
 
 {-

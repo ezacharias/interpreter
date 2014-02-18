@@ -70,7 +70,7 @@ eval t =
     UnitTerm ->
       return UnitValue
     UnreachableTerm _ ->
-      unreachable
+      runUnreachable
     UntupleTerm ds t1 t2 -> do
       v1 <- eval t1
       bind (zip ds (tupleValues v1)) (eval t2)
@@ -88,12 +88,12 @@ bind ps m = do
 getValue :: Ident -> M Value
 getValue d = do
   r <- getEnv
-  return $ fromMaybe (error "getValue") (IntMap.lookup d r)
+  return $ fromMaybe (unreachable "getValue") (IntMap.lookup d r)
 
 getFun :: Ident -> M Term
 getFun d = do
   g <- getG
-  let Fun _ t = fromMaybe (error "getFun") (IntMap.lookup d g)
+  let Fun _ t = fromMaybe (unreachable "getFun") (IntMap.lookup d g)
   return t
 
 newtype M a = M { runM :: G -> Env -> K a -> K1 -> K2 -> Status }
@@ -120,8 +120,8 @@ emptyK1 = K1 $ const ExitStatus
 emptyK2 :: K2
 emptyK2 = K2 $ \ d k v -> EscapeStatus d v
 
-unreachable :: M Value
-unreachable = M $ \ _ _ _ _ _ -> UndefinedStatus
+runUnreachable :: M Value
+runUnreachable = M $ \ _ _ _ _ _ -> UndefinedStatus
 
 throw :: Ident -> Value -> M Value
 throw d v = M $ \ _ _ k _ k2 -> runK2 k2 d k v
@@ -143,3 +143,9 @@ getEnv = M $ \ _ r k -> runK k r
 
 getG :: M G
 getG = M $ \ g _ k -> runK k g
+
+todo :: String -> a
+todo s = error $ "todo: Interpreter." ++ s
+
+unreachable :: String -> a
+unreachable s = error $ "unreachable: Interpreter." ++ s
