@@ -39,7 +39,7 @@ convertTerm :: Syntax.Term -> M Syntax.Term
 convertTerm t =
   case t of
     Syntax.UpperTerm pos _ _ s tas -> do
-      (ss, ty) <- lookupFunction s
+      (ss, ty) <- getFun (Type.Path (map (\ s -> Type.Name s []) s))
       ts' <- case tas of
         Nothing -> mapM (const gen) ss
         Just tas -> return $ map convertType tas
@@ -49,9 +49,42 @@ convertTerm t =
       todo $ "convertTerm: " ++ show t
 
 -- Returns the type paramaters and the full type of the function.
-lookupFunction :: Syntax.Qual -> M ([String], Type.Type)
-lookupFunction ["Exit"] = return ([], Type.Variant (Type.Path [Type.Name "Output" []]))
-lookupFunction q = return $ (todo "lookupFunction", todo "lookupFunction")
+getFun :: Type.Path -> M ([String], Type.Type)
+getFun q = do
+  r <- getEnv
+  return $ envGetFun r q
+
+envGetFun :: Env -> Type.Path -> ([String], Type.Type)
+envGetFun r (Type.Path [n])    = envGetFunWithName r n
+envGetFun r (Type.Path (n:ns)) = envGetFunWithFields (envGetModWithName r n) (Type.Path ns)
+envGetFun r (Type.Path [])     = unreachable "envGetFun"
+
+envGetFunWithName :: Env -> Type.Name -> ([String], Type.Type)
+envGetFunWithName [] (Type.Name "Exit" []) = ([], Type.Variant (Type.Path [Type.Name "Output" []]))
+envGetFunWithName [] _ = unreachable "envGetFunWithName"
+envGetFunWithName ((Type.Path q, ds) : r) (Type.Name s1 tys) = check $ search has ds
+  where check Nothing = envGetFunWithName r (Type.Name s1 tys)
+        check (Just x) = x
+        has dec =
+          case dec of
+            Syntax.FunDec _ ty0s ty0 s2 ss ps _ t | s1 == s2 ->
+              todo "envGetFunWithName"
+              {-
+              let q' = Type.Path (q ++ [Type.Name s1 tys])
+                  f d = withEnv (Env r) $ do
+                    t <- elaborateLambda ps (map (const (todo "envGetFunWithName 1")) ps) t
+                    ty0s <- mapM elaborateType ty0s
+                    ty0 <- elaborateType ty0
+                    ty <- return $ foldr Simple.ArrowType ty0 ty0s
+                    addFun d (Simple.Fun ty t)
+               in Just (q', f)
+              -}
+            _ ->
+              Nothing
+
+
+envGetFunWithFields :: Env -> Type.Path -> ([String], Type.Type)
+envGetFunWithFields r q = todo "envGetFunWithFields"
 
 convertType :: Syntax.Typ -> Type.Type
 convertType = todo "convertType"
@@ -100,8 +133,8 @@ envGetType r (Type.Path [n]) = envGetTypeWithName r n
 envGetType r (Type.Path (n:ns)) = envGetTypeWithFields (envGetModWithName r n) (Type.Path ns)
 
 envGetTypeWithName :: Env -> Type.Name -> Type.Type
+envGetTypeWithName [] (Type.Name "Output" []) = Type.Variant (Type.Path [Type.Name "Output" []])
 envGetTypeWithName [] x = unreachable $ "envGetTypeWithName: " ++ show x
-envGetTypeWithName _ (Type.Name "Output" []) = Type.Variant (Type.Path [Type.Name "Output" []])
 envGetTypeWithName (r@((q, ds):r')) (Type.Name s1 tys) = check $ search has ds
   where check Nothing = envGetTypeWithName r' (Type.Name s1 tys)
         check (Just x) = x
