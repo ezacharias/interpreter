@@ -5,6 +5,7 @@ module Compiler.TokenParser
 
 import           Control.Applicative (Alternative, Applicative, empty, many, optional,
                                       pure, some, (<*>), (<|>))
+import  Data.Maybe (fromMaybe)
 import           Control.Monad
 import           Data.Foldable       (asum)
 
@@ -358,7 +359,7 @@ exp3 = choice [ do pos <- position
               , do pos <- position
                    x1 <- qual
                    x2s <- optional typArguments
-                   return $ Syntax.UpperTerm pos [] Type.Unit x1 x2s
+                   return $ Syntax.UpperTerm pos [] Type.Unit x1 (fromMaybe [] x2s)
               , do pos <- position
                    x <- string
                    return $ Syntax.StringTerm pos x
