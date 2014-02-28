@@ -1,6 +1,6 @@
 module Compiler.Type where
 
-import Data.Maybe (fromMaybe)
+import           Data.Maybe (fromMaybe)
 
 type Metavariable = Int
 

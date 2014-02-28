@@ -8,14 +8,14 @@ It makes programs very clear and easy to understand.
 
       sum Result⟦a⟧
         Finished(a)
-        Suspended(() ⟶ Fork.Result⟦a⟧)
+        Suspended(() ⟶ Result⟦a⟧)
 
       Fork⟦a, b⟧(f : () ⟶ a, g : () ⟶ b) : (a, b)
         bind fr to E.Catch(Compose(Finished)(f))(Constant(Suspended))
         bind gr to E.Catch(Compose(Finished)(g))(Constant(Suspended))
         Loop(fr, gr)
 
-      Loop⟦a, b⟧(fr : Fork.Result⟦a⟧, gr : Fork.Result⟦b⟧) : (a, b)
+      Loop⟦a, b⟧(fr : Result⟦a⟧, gr : Result⟦b⟧) : (a, b)
         case fr
           Finished(x)
             (x, Complete(gr))
@@ -26,7 +26,7 @@ It makes programs very clear and easy to understand.
               Suspended(g)
                 Loop(f(), g())
 
-      Complete⟦a⟧(r : Fork.Result⟦a⟧) : a
+      Complete⟦a⟧(r : Result⟦a⟧) : a
         case r
           Finished(x)
             x

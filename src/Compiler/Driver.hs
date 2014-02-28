@@ -37,7 +37,7 @@ liftIO io = DriverPerformIO (liftM return io)
 
 -- | Takes a filename and interprets the file.
 interpreter :: String -> Driver ()
-interpreter = parse >=> syntaxCheck >=> typeCheck >=> elaborate >=> interpret
+interpreter = parse >=> syntaxCheck >=> typeCheck >=> floop >=> elaborate >=> interpret
 
 floop :: Show a => a -> Driver b
 floop x = liftIO (writeFile "/dev/null" (show x)) >> liftIO exitFailure
