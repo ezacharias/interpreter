@@ -41,7 +41,7 @@ inferDec (Syntax.SumDec pos s ss rs) =
 
 -- ty0s and ty0 have been converted in Meta.
 inferDec (Syntax.FunDec pos ty0s ty0 s ss ps ty t) = do
-  case inferTerm g sigmaEmpty (Syntax.typType ty) t of
+  case inferTerm g sigmaEmpty ty0 t of
     Left msg -> Left msg
     Right t -> Right $ Syntax.FunDec pos ty0s ty0 s ss ps ty t
   where g = either (\ _ -> error "impossible") id $ gammaWithPats g sigmaEmpty ps ty0s

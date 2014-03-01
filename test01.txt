@@ -2,4 +2,64 @@ The minimial program.
 
 
     Main : Output
+      bind x to ()
       Exit
+
+    unit Get⟦t⟧
+
+      new E = Escape⟦(), t⟧
+
+      With⟦a⟧(x : t)(f : () ⟶ a) : a
+        for ()(f) in E.Catch(f)
+          f(x)
+
+      Get : t
+        E.Throw()
+
+    sum Bool
+      False
+      True
+
+    sum Either⟦a, b⟧
+      Left(a)
+      Right(b)
+
+    unit Error
+
+      new E = Escape⟦String, ()⟧
+
+      With⟦a⟧(f : () ⟶ a) : Either⟦String, a⟧
+        for (x)(_) in E.Catch(Compose(Right)(f))
+          Left(x)
+
+      Error⟦a⟧(x : String) : a
+        E.Throw(x)
+        Unreachable
+
+    One : String
+      "1"
+
+    Identity⟦a⟧(x : a) : a
+      x
+
+    Compose⟦a, b, c⟧(f : b ⟶ c)(g : a ⟶ b)(x : a) : c
+      f(g(x))
+
+    Constant⟦a, b⟧(x : a)(y : b) : a
+      x
+
+    sum List⟦a⟧
+      Nil
+      Cons(a, List⟦a⟧)
+
+    First⟦a, b⟧(x : a, y : b) : a
+      x
+
+    Second⟦a, b⟧(x : a, y : b) : b
+      y
+
+    Curry⟦a, b, c⟧(f : (a, b) ⟶ c)(x : a)(y : b) : c
+      f(x, y)
+
+    Uncurry⟦a, b, c⟧(f : a ⟶ b ⟶ c)(x : a, y : b) : c
+      f(x)(y)

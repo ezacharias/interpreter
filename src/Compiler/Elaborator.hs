@@ -52,6 +52,7 @@ envGetFun r (Type.Path [])     = unreachable "envGetFun"
 
 envGetFunWithName :: Env -> Type.Name -> (Type.Path, Simple.Ident -> M ())
 envGetFunWithName (Env []) (Type.Name "Exit" []) = (Type.Path [Type.Name "Exit" []], primitiveExit)
+envGetFunWithName (Env []) (Type.Name "Unreachable" [ty]) = (Type.Path [Type.Name "Unreachable" [ty]], primitiveUnreachable ty)
 envGetFunWithName (Env []) n = unreachable $ "envGetFunWithName: " ++ show n
 envGetFunWithName (Env r@((_, q, _, ds) : r')) (Type.Name s1 tys) = check $ search has ds
   where check Nothing = envGetFunWithName (Env r') (Type.Name s1 tys)
@@ -248,6 +249,11 @@ primitiveExit :: Int -> M ()
 primitiveExit d =
   addFun d $ Simple.Fun (Simple.SumType 0) (Simple.ConstructorTerm 0 0 [])
 
+primitiveUnreachable :: Type.Type -> Int -> M ()
+primitiveUnreachable ty d = do
+  ty <- elaborateType ty
+  addFun d $ Simple.Fun ty (Simple.UnreachableTerm ty)
+
 -- The types have already been updated.
 elaborateLambda :: [Syntax.Pat] -> [Type.Type] -> Syntax.Term -> M Simple.Term
 elaborateLambda []     []       t = elaborateTerm t
@@ -386,9 +392,21 @@ withLowerBind = todo "withLowerBind"
 elaborateTerm :: Syntax.Term -> M Simple.Term
 elaborateTerm t =
   case t of
+    Syntax.BindTerm _ p t1 t2 -> do
+      d <- gen
+      t1 <- elaborateTerm t1
+      t2 <- withPat d p (elaborateTerm t2)
+      return $ Simple.BindTerm d t1 t2
     Syntax.CaseTerm ty t rs -> do
       t <- elaborateTerm t
       elaborateCase ty t rs
+    Syntax.SeqTerm t1 t2 -> do
+      d <- gen
+      t1 <- elaborateTerm t1
+      t2 <- elaborateTerm t2
+      return $ Simple.BindTerm d t1 t2
+    Syntax.UnitTerm _ ->
+      return $ Simple.UnitTerm
 --    Syntax.UpperTerm _ [] _ ["Exit"] Nothing ->
     Syntax.UpperTerm _ tys _ ss _ -> do
       d <- getFun (convertQual ss tys)
@@ -521,10 +539,14 @@ run (Syntax.Program ds) m = runM m r k genVal [] exportedSums exportedFuns progr
         exportedSums = Map.empty
         exportedFuns = Map.empty
         programTags = IdentMap.empty
+        programSums = IdentMap.empty
+        programFuns = IdentMap.empty
+        {-
         programSums = IdentMap.fromList [ (0, Simple.Sum [[]])
                                         ]
-        programFuns = IdentMap.fromList [ (1, Simple.Fun (todo "run") (Simple.ConstructorTerm 0 0 []))
+        programFuns = IdentMap.fromList [ (1, Simple.Fun (Simple.SumType 0) (Simple.ConstructorTerm 0 0 []))
                                         ]
+        -}
 
 newtype M a = M { runM :: Env -> (a -> Int -> [M ()] -> Map Type.Path Int -> Map Type.Path Int -> Simple.IdentMap Simple.Tag -> Simple.IdentMap Simple.Sum -> Simple.IdentMap Simple.Fun -> Simple.Program)
                                     -> Int -> [M ()] -> Map Type.Path Int -> Map Type.Path Int -> Simple.IdentMap Simple.Tag -> Simple.IdentMap Simple.Sum -> Simple.IdentMap Simple.Fun -> Simple.Program
