@@ -1,9 +1,27 @@
 The minimial program.
 
 
+    mod IO
+
+      sub R ↦ Root
+
+      new E = Escape⟦Output ⟶ Output, ()⟧
+
+      With(f : () ⟶ ()) : Output
+        for (g)(k) in E.Catch(Compose(Constant(R.Exit))(f))
+          g(Continue(k))
+
+      Write(x : String) : ()
+        E.Throw(R.Write(x))
+
+      Exit⟦a⟧ : a
+        E.Throw(Constant(R.Exit))
+        Unreachable
+
     Main : Output
-      bind x to ()
-      Exit
+      in IO.With
+        IO.Write("A")
+        IO.Write("B")
 
     unit Get⟦t⟧
 

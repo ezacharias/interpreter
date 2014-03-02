@@ -74,9 +74,14 @@ convertTerm t =
       t1 <- convertTerm t1
       t2 <- convertTerm t2
       return $ Syntax.BindTerm ty p t1 t2
+    Syntax.CaseTerm _ t rs -> do
+      ty <- gen
+      t <- convertTerm t
+      rs <- mapM convertRule rs
+      return $ Syntax.CaseTerm ty t rs
     Syntax.ForTerm _ _ p t1 t2 -> do
       tys <- case p of
-        Nothing -> return []
+        Nothing -> return [Type.Unit]
         Just ps -> mapM (const gen) ps
       ty <- gen
       p <- case p of
@@ -112,6 +117,12 @@ convertTerm t =
     t ->
       todo $ "convertTerm: " ++ show t
 
+convertRule :: Syntax.Rule -> M Syntax.Rule
+convertRule (pat, t) = do
+  pat <- convertPat pat
+  t <- convertTerm t
+  return (pat, t)
+
 convertPat :: Syntax.Pat -> M Syntax.Pat
 convertPat p =
   case p of
@@ -121,7 +132,43 @@ convertPat p =
       return $ Syntax.UnderbarPat
     Syntax.UnitPat pos ->
       return $ Syntax.UnitPat pos
+    Syntax.UpperPat pos _ _ q ps -> do
+      (ty, tys) <- getConstructor (createPath q [])
+      ps <- mapM convertPat ps
+      return $ Syntax.UpperPat pos tys ty q ps
     _ -> todo $ "convertPat: " ++ show p
+
+getConstructor :: Type.Path -> M (Type.Type, [Type.Type])
+getConstructor q = do
+  r <- getEnv
+  return $ envGetConstructor r q
+
+envGetConstructor :: Env -> Type.Path -> (Type.Type, [Type.Type])
+envGetConstructor r (Type.Path [n])    = envGetConstructorWithName r n
+envGetConstructor r (Type.Path (n:ns)) = envGetConstructorWithFields (envGetModWithName r n) (Type.Path ns)
+envGetConstructor r (Type.Path [])     = unreachable "envGetConstructor"
+
+envGetConstructorWithName :: Env -> Type.Name -> (Type.Type, [Type.Type])
+envGetConstructorWithName (Env []) q = unreachable $ "envGetConstructorWithName: " ++ show q
+envGetConstructorWithName (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetConstructorWithName: " ++ show q1
+envGetConstructorWithName (Env r@((Nothing, q, _, ds) : r')) (Type.Name s1 tys) = check $ search has ds
+  where check Nothing = envGetConstructorWithName (Env r') (Type.Name s1 tys)
+        check (Just x) = x
+        has dec =
+          case dec of
+            Syntax.SumDec _ s2 ss cs ->
+              let hasConstructor (_, s3, tys) | s1 == s3 =
+                    let tys' = map (envConvertType (envAddTypeVariables (Env r) ss)) tys
+                        ty' = Type.Variant (Type.pathAddName q (Type.Name s2 (map Type.Variable ss)))
+                     in Just (ty', tys')
+                  hasConstructor _ =
+                    Nothing
+               in search hasConstructor cs
+            _ ->
+              Nothing
+
+envGetConstructorWithFields :: Env -> Type.Path -> (Type.Type, [Type.Type])
+envGetConstructorWithFields r q = todo "envGetConstructorWithFields"
 
 -- Returns the type paramaters and the full type of the function.
 getFun :: Type.Path -> M ([String], Type.Type)
@@ -134,9 +181,24 @@ envGetFun r (Type.Path [n])    = envGetFunWithName r n
 envGetFun r (Type.Path (n:ns)) = envGetFunWithFields (envGetModWithName r n) (Type.Path ns)
 envGetFun r (Type.Path [])     = unreachable "envGetFun"
 
+exitPrimitive :: ([String], Type.Type)
+exitPrimitive = ([], Type.Variant (Type.Path [Type.Name "Output" []]))
+
+writePrimitive :: ([String], Type.Type)
+writePrimitive = ([], Type.Arrow Type.String
+                                 (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
+                                             (Type.Variant (Type.Path [Type.Name "Output" []]))))
+
+continuePrimitive :: ([String], Type.Type)
+continuePrimitive = ([], Type.Arrow (Type.Arrow Type.Unit
+                                                (Type.Variant (Type.Path [Type.Name "Output" []])))
+                                    (Type.Variant (Type.Path [Type.Name "Output" []])))
+
 -- Should this check the static path?
 envGetFunWithName :: Env -> Type.Name -> ([String], Type.Type)
-envGetFunWithName (Env []) (Type.Name "Exit" _) = ([], Type.Variant (Type.Path [Type.Name "Output" []]))
+envGetFunWithName (Env []) (Type.Name "Continue" _) = continuePrimitive
+envGetFunWithName (Env []) (Type.Name "Exit" _) = exitPrimitive
+envGetFunWithName (Env []) (Type.Name "Write" _) = writePrimitive
 envGetFunWithName (Env []) (Type.Name "Unreachable" _) = (["a"], Type.Variable "a")
 envGetFunWithName (Env []) q = unreachable $ "envGetFunWithName: " ++ show q
 envGetFunWithName (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetFunWithName: " ++ show q1
@@ -178,13 +240,16 @@ throwPrimitive ty1 ty2 =
   )
 
 envGetFunWithFields :: Env -> Type.Path -> ([String], Type.Type)
-envGetFunWithFields (Env []) _ = unreachable "envGetFunWithFields"
-envGetFunWithFields _ (Type.Path []) = unreachable "envGetFunWithFields"
+envGetFunWithFields (Env []) (Type.Path [Type.Name "Continue" _]) = continuePrimitive
+envGetFunWithFields (Env []) (Type.Path [Type.Name "Exit" _]) = exitPrimitive
+envGetFunWithFields (Env []) (Type.Path [Type.Name "Write" _]) = writePrimitive
+envGetFunWithFields (Env []) n = unreachable $ "envGetFunWithFields: " ++ show n
+envGetFunWithFields _ (Type.Path []) = unreachable "envGetFunWithFields 2"
 envGetFunWithFields (Env r@((Just (Type.Path [Type.Name "Escape" [ty1, ty2]]), _, _, _):r')) (Type.Path [Type.Name "Catch" []]) = catchPrimitive ty1 ty2
 envGetFunWithFields (Env r@((Just (Type.Path [Type.Name "Escape" [ty1, ty2]]), _, _, _):r')) (Type.Path [Type.Name "Throw" []]) = throwPrimitive ty1 ty2
 envGetFunWithFields (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetFunWithFields: " ++ show q1
 envGetFunWithFields (Env r@((Nothing, q, _, ds):r')) (Type.Path [Type.Name s1 tys]) = check $ search has ds
-  where check Nothing = unreachable "envGetFunWithFields"
+  where check Nothing = unreachable "envGetFunWithFields 3"
         check (Just x) = x
         has dec =
           case dec of
@@ -194,7 +259,7 @@ envGetFunWithFields (Env r@((Nothing, q, _, ds):r')) (Type.Path [Type.Name s1 ty
             _ ->
               Nothing
 envGetFunWithFields (Env r@((Nothing, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):ns)) = check $ search has ds
-  where check Nothing = unreachable "envGetFunWithFields"
+  where check Nothing = unreachable "envGetFunWithFields 4"
         check (Just r'') = envGetFunWithFields r'' (Type.Path ns)
         has dec =
           case dec of
@@ -351,6 +416,7 @@ envGetMod r (Type.Path []) = unreachable "envGetMod"
 envGetMod r (Type.Path (n:ns)) = envGetModWithFields (envGetModWithName r n) (Type.Path ns)
 
 envGetModWithName :: Env -> Type.Name -> Env
+envGetModWithName (Env []) (Type.Name "Root" []) = Env []
 envGetModWithName (Env []) n = unreachable $ "envGetModWithName: " ++ show n
 envGetModWithName (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetModWithName: " ++ show q1
 envGetModWithName (Env r@((Nothing, q, _, ds):r')) (Type.Name s1 tys) = check $ search has ds
@@ -370,8 +436,8 @@ envGetModWithName (Env r@((Nothing, q, _, ds):r')) (Type.Name s1 tys) = check $ 
               Nothing
 
 envGetModWithFields :: Env -> Type.Path -> Env
-envGetModWithFields (Env []) _ = unreachable "envGetModWithFields"
 envGetModWithFields r (Type.Path []) = r
+envGetModWithFields (Env []) n = unreachable $ "envGetModWithFields: " ++ show n
 envGetModWithFields (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetModWithFields: " ++ show q1
 envGetModWithFields (Env r@((Nothing, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):ns)) = check $ search has ds
   where check Nothing = unreachable "envGetModWithFields"

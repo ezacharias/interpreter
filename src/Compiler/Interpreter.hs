@@ -115,7 +115,10 @@ emptyK :: K Value
 emptyK = K $ \ v k1 _ -> runK1 k1 v
 
 emptyK1 :: K1
-emptyK1 = K1 $ const ExitStatus
+emptyK1 = K1 $ f
+  where f (ConstructorValue 0 []) = ExitStatus
+        f (ConstructorValue 1 [StringValue s, x]) = WriteStatus s (f x)
+        f _ = unreachable "Interpreter"
 
 emptyK2 :: K2
 emptyK2 = K2 $ \ d k v -> EscapeStatus d v

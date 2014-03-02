@@ -51,7 +51,9 @@ envGetFun r (Type.Path (n:ns)) = envGetFunWithFields (envGetModWithName r n) (Ty
 envGetFun r (Type.Path [])     = unreachable "envGetFun"
 
 envGetFunWithName :: Env -> Type.Name -> (Type.Path, Simple.Ident -> M ())
+envGetFunWithName (Env []) (Type.Name "Continue" []) = (Type.Path [Type.Name "Continue" []], primitiveContinue)
 envGetFunWithName (Env []) (Type.Name "Exit" []) = (Type.Path [Type.Name "Exit" []], primitiveExit)
+envGetFunWithName (Env []) (Type.Name "Write" []) = (Type.Path [Type.Name "Write" []], primitiveWrite)
 envGetFunWithName (Env []) (Type.Name "Unreachable" [ty]) = (Type.Path [Type.Name "Unreachable" [ty]], primitiveUnreachable ty)
 envGetFunWithName (Env []) n = unreachable $ "envGetFunWithName: " ++ show n
 envGetFunWithName (Env r@((_, q, _, ds) : r')) (Type.Name s1 tys) = check $ search has ds
@@ -74,11 +76,44 @@ envGetFunWithName (Env r@((_, q, _, ds) : r')) (Type.Name s1 tys) = check $ sear
             _ ->
               Nothing
 
+catchPrimitive :: Type.Type -> Type.Type -> Type.Type -> (Type.Path, Simple.Ident -> M ())
+catchPrimitive ty1 ty2 ty3 = (Type.Path [Type.Name "Escape" [ty1, ty2], Type.Name "Catch" [ty3]], f)
+  where f d1 = do
+          d2 <- gen
+          d3 <- gen
+          d4 <- gen
+          d5 <- gen
+          ty1 <- elaborateType ty1
+          ty2 <- elaborateType ty2
+          ty3 <- elaborateType ty3
+          addFun d1 (Simple.Fun (Simple.ArrowType (todo "catchPrimitive") (todo "catchPrimitive"))
+                      (Simple.LambdaTerm d2 (todo "catchPrimitive")
+                        (Simple.LambdaTerm d3 (todo "catchPrimitive")
+                          (Simple.CatchTerm (todo "catchPrimitive") (Simple.VariableTerm d2) d4 d5
+                            (Simple.ApplyTerm (Simple.ApplyTerm (Simple.VariableTerm d3)
+                                                                (Simple.VariableTerm d4))
+                                              (Simple.VariableTerm d5))))))
+
+throwPrimitive :: Type.Type -> Type.Type -> (Type.Path, Simple.Ident -> M ())
+throwPrimitive ty1 ty2 = (Type.Path [Type.Name "Escape" [ty1, ty2], Type.Name "Throw" []], f)
+  where f d1 = do
+          d2 <- gen
+          tag <- todo "throwPrimitive"
+          ty1 <- elaborateType ty1
+          ty2 <- elaborateType ty2
+          addFun d1 (Simple.Fun (Simple.ArrowType ty1 ty2)
+                      (Simple.LambdaTerm d2 ty1 (Simple.ThrowTerm tag (Simple.VariableTerm d2))))
+
 envGetFunWithFields :: Env -> Type.Path -> (Type.Path, Simple.Ident -> M ())
-envGetFunWithFields (Env []) _ = unreachable "envGetFunWithFields"
-envGetFunWithFields _ (Type.Path []) = unreachable "envGetFunWithFields"
+envGetFunWithFields (Env []) (Type.Path [Type.Name "Exit" []]) = (Type.Path [Type.Name "Exit" []], primitiveExit)
+envGetFunWithFields (Env []) (Type.Path [Type.Name "Write" []]) = (Type.Path [Type.Name "Write" []], primitiveWrite)
+envGetFunWithFields (Env []) (Type.Path [Type.Name "Unreachable" [ty]]) = (Type.Path [Type.Name "Unreachable" [ty]], primitiveUnreachable ty)
+envGetFunWithFields (Env []) n = unreachable $ "envGetFunWithFields: " ++ show n
+envGetFunWithFields _ (Type.Path []) = unreachable "envGetFunWithFields 1"
+envGetFunWithFields (Env r@((Just (Type.Path [Type.Name "Escape" [ty1, ty2]]), _, _, _):r')) (Type.Path [Type.Name "Catch" [ty3]]) = catchPrimitive ty1 ty2 ty3
+envGetFunWithFields (Env r@((Just (Type.Path [Type.Name "Escape" [ty1, ty2]]), _, _, _):r')) (Type.Path [Type.Name "Throw" []]) = throwPrimitive ty1 ty2
 envGetFunWithFields (Env r@((_, Type.Path q, _, ds):r')) (Type.Path [Type.Name s1 tys]) = check $ search has ds
-  where check Nothing = unreachable "envGetFunWithFields"
+  where check Nothing = unreachable $ "envGetFunWithFields 2: " ++ s1
         check (Just x) = x
         has dec =
           case dec of
@@ -97,7 +132,7 @@ envGetFunWithFields (Env r@((_, Type.Path q, _, ds):r')) (Type.Path [Type.Name s
             _ ->
               Nothing
 envGetFunWithFields (Env r@((_, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):ns)) = check $ search has ds
-  where check Nothing = unreachable "envGetFunWithFields"
+  where check Nothing = unreachable "envGetFunWithFields 3"
         check (Just r'') = envGetFunWithFields r'' (Type.Path ns)
         has dec =
           case dec of
@@ -171,7 +206,8 @@ envGetMod r (Type.Path q) =
     n:ns -> envGetModWithFields (envGetModWithName r n) (Type.Path ns)
 
 envGetModWithName :: Env -> Type.Name -> Env
-envGetModWithName (Env []) _ = unreachable "envGetModWithName"
+envGetModWithName (Env []) (Type.Name "Root" []) = Env []
+envGetModWithName (Env []) n = unreachable $ "envGetModWithName: " ++ show n
 envGetModWithName (Env r@((_, q, _, ds):r')) (Type.Name s1 tys) = check $ search has ds
   where check Nothing = envGetModWithName (Env r') (Type.Name s1 tys)
         check (Just x) = x
@@ -180,7 +216,7 @@ envGetModWithName (Env r@((_, q, _, ds):r')) (Type.Name s1 tys) = check $ search
             Syntax.ModDec _ s2 ds | s1 == s2 ->
               Just (Env ((Nothing, Type.pathAddName q (Type.Name s1 []) , [], ds) : r))
             Syntax.NewDec _ ty2s s2 s3s _ | s1 == s2 ->
-              todo "envGetModWithName"
+              Just (envGetUnit (Env r) (convertQual s3s ty2s) (Type.pathAddName q (Type.Name s1 tys)))
             Syntax.SubDec _ s2 q2 | s1 == s2 ->
               -- Note that r' is used because alias lookup starts at the outer level.
               Just (envGetMod (Env r') (convertQual q2 []))
@@ -188,8 +224,8 @@ envGetModWithName (Env r@((_, q, _, ds):r')) (Type.Name s1 tys) = check $ search
               Nothing
 
 envGetModWithFields :: Env -> Type.Path -> Env
-envGetModWithFields (Env []) _ = unreachable "envGetModWithFields"
 envGetModWithFields r (Type.Path []) = r
+envGetModWithFields (Env []) n = unreachable $ "envGetModWithFields: " ++ show n
 envGetModWithFields (Env r@((_, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):ns)) = check $ search has ds
   where check Nothing = unreachable "envGetMod"
         check (Just r'') = envGetModWithFields r'' (Type.Path ns)
@@ -208,8 +244,12 @@ envGetUnit _ (Type.Path [])     = unreachable "envGetUnit"
 envGetUnit r (Type.Path [n])    = envGetUnitWithName r n
 envGetUnit r (Type.Path (n:ns)) = envGetUnitWithFields (envGetModWithName r n) (Type.Path ns)
 
+primitiveEscape :: Type.Type -> Type.Type -> (Type.Path -> Env)
+primitiveEscape ty1 ty2 q = Env [(Just (Type.Path [Type.Name "Escape" [ty1, ty2]]), q, [], [])]
+
 envGetUnitWithName :: Env -> Type.Name -> (Type.Path -> Env)
-envGetUnitWithName (Env []) _ = unreachable "envGetUnitWithName"
+envGetUnitWithName (Env []) (Type.Name "Escape" [ty1, ty2]) = primitiveEscape ty1 ty2
+envGetUnitWithName (Env []) n = unreachable $ "envGetUnitWithName: " ++ show n
 envGetUnitWithName (Env r@((_, q, _, ds) : r')) (Type.Name s1 tys) = check $ search has ds
   where check Nothing = envGetUnitWithName (Env r') (Type.Name s1 tys)
         check (Just x) = x
@@ -248,6 +288,23 @@ envGetUnitWithFields (Env r@((_, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):n
 primitiveExit :: Int -> M ()
 primitiveExit d =
   addFun d $ Simple.Fun (Simple.SumType 0) (Simple.ConstructorTerm 0 0 [])
+
+primitiveWrite :: Int -> M ()
+primitiveWrite d1 = do
+  d2 <- gen
+  d3 <- gen
+  addFun d1 $ Simple.Fun (Simple.ArrowType Simple.StringType
+                                           (Simple.ArrowType (Simple.SumType 0)
+                                                             (Simple.SumType 0)))
+                (Simple.LambdaTerm d2 Simple.StringType
+                  (Simple.LambdaTerm d3 (Simple.SumType 0)
+                    (Simple.ConstructorTerm 0 1 [Simple.VariableTerm d2, Simple.VariableTerm d3])))
+
+primitiveContinue :: Int -> M ()
+primitiveContinue d1 = do
+  d2 <- gen
+  addFun d1 $ Simple.Fun (Simple.SumType 0)
+                (Simple.LambdaTerm d2 (todo "primitiveContinue") (todo "primitiveContinue"))
 
 primitiveUnreachable :: Type.Type -> Int -> M ()
 primitiveUnreachable ty d = do
@@ -387,11 +444,22 @@ withPats _ _ _ = unreachable "withPats"
 
 -- This does not, from what I can see, require a type.
 withLowerBind :: String -> Simple.Ident -> M Simple.Term -> M Simple.Term
-withLowerBind = todo "withLowerBind"
+withLowerBind s d m = do
+  xs <- getLowerBinds
+  withLowerBinds (Map.insert s d xs) m
+
+getLowerBind :: String -> M Simple.Ident
+getLowerBind s = do
+  xs <- getLowerBinds
+  return $ fromMaybe (unreachable "getLowerBind") (Map.lookup s xs)
 
 elaborateTerm :: Syntax.Term -> M Simple.Term
 elaborateTerm t =
   case t of
+    Syntax.ApplyTerm _ t1 t2 -> do
+      t1 <- elaborateTerm t1
+      t2 <- elaborateTerm t2
+      return $ Simple.ApplyTerm t1 t2
     Syntax.BindTerm _ p t1 t2 -> do
       d <- gen
       t1 <- elaborateTerm t1
@@ -400,17 +468,33 @@ elaborateTerm t =
     Syntax.CaseTerm ty t rs -> do
       t <- elaborateTerm t
       elaborateCase ty t rs
+--          | ForTerm [Type.Type] Type.Type (Maybe [Pat]) Term Term
+    Syntax.ForTerm tys _ p t1 t2 -> do
+      t1 <- elaborateTerm t1
+      t2 <- case p of
+        Nothing -> do
+          d <- gen
+          t2 <- elaborateTerm t2
+          return $ Simple.LambdaTerm d Simple.UnitType t2
+        Just ps ->
+          elaborateLambda ps tys t2
+      return $ Simple.ApplyTerm t1 t2
     Syntax.SeqTerm t1 t2 -> do
       d <- gen
       t1 <- elaborateTerm t1
       t2 <- elaborateTerm t2
       return $ Simple.BindTerm d t1 t2
+    Syntax.StringTerm _ x ->
+      return $ Simple.StringTerm x
     Syntax.UnitTerm _ ->
       return $ Simple.UnitTerm
 --    Syntax.UpperTerm _ [] _ ["Exit"] Nothing ->
     Syntax.UpperTerm _ tys _ ss _ -> do
       d <- getFun (convertQual ss tys)
       return $ Simple.FunTerm d
+    Syntax.VariableTerm _ s -> do
+      d <- getLowerBind s
+      return $ Simple.VariableTerm d
     _ -> todo $ "elaborateTerm: " ++ show t
 
 convertQual :: [String] -> [Type.Type] -> Type.Path
@@ -532,8 +616,9 @@ expandTuple ds _ = unreachable "expandTulpe"
 data Env = Env [(Maybe Type.Path, Type.Path, [(String, Type.Type)], [Syntax.Dec])]
 
 run :: Syntax.Program -> M Simple.Program -> Simple.Program
-run (Syntax.Program ds) m = runM m r k genVal [] exportedSums exportedFuns programTags programSums programFuns
+run (Syntax.Program ds) m = runM m r localBinds k genVal [] exportedSums exportedFuns programTags programSums programFuns
   where r = Env [(Nothing, Type.Path [], [], ds)]
+        localBinds = Map.empty
         k x _ _ _ _ _ _ _ = x
         genVal = 2
         exportedSums = Map.empty
@@ -548,49 +633,57 @@ run (Syntax.Program ds) m = runM m r k genVal [] exportedSums exportedFuns progr
                                         ]
         -}
 
-newtype M a = M { runM :: Env -> (a -> Int -> [M ()] -> Map Type.Path Int -> Map Type.Path Int -> Simple.IdentMap Simple.Tag -> Simple.IdentMap Simple.Sum -> Simple.IdentMap Simple.Fun -> Simple.Program)
-                                    -> Int -> [M ()] -> Map Type.Path Int -> Map Type.Path Int -> Simple.IdentMap Simple.Tag -> Simple.IdentMap Simple.Sum -> Simple.IdentMap Simple.Fun -> Simple.Program
+newtype M a = M { runM :: Env -> (Map String Simple.Ident) -> (a -> Int -> [M ()] -> Map Type.Path Int -> Map Type.Path Int -> Simple.IdentMap Simple.Tag -> Simple.IdentMap Simple.Sum -> Simple.IdentMap Simple.Fun -> Simple.Program)
+                                                                 -> Int -> [M ()] -> Map Type.Path Int -> Map Type.Path Int -> Simple.IdentMap Simple.Tag -> Simple.IdentMap Simple.Sum -> Simple.IdentMap Simple.Fun -> Simple.Program
                 }
 
 instance Monad M where
-  return x = M (\ r k -> k x)
-  m >>= f = M (\ r k -> runM m r (\ x -> runM (f x) r k))
+  return x = M (\ r localBinds k -> k x)
+  m >>= f = M (\ r localBinds k -> runM m r localBinds (\ x -> runM (f x) r localBinds k))
 
 getEnv :: M Env
 getEnv = M f
-  where f r k = k r
+  where f r localBinds k = k r
 
 withEnv :: Env -> M () -> M ()
 withEnv r' m = M f
-  where f r k = runM m r' k
+  where f r localBinds k = runM m r' localBinds k
+
+getLowerBinds :: M (Map String Simple.Ident)
+getLowerBinds = M f
+  where f r localBinds k = k localBinds
+
+withLowerBinds :: Map String Simple.Ident -> M a -> M a
+withLowerBinds localBinds' m = M f
+  where f r localBinds k = runM m r localBinds' k
 
 getExportedFuns :: M (Map Type.Path Int)
 getExportedFuns = M f
-  where f r k genVal work exportedSums exportedFuns = k exportedFuns genVal work exportedSums exportedFuns
+  where f r localBinds k genVal work exportedSums exportedFuns = k exportedFuns genVal work exportedSums exportedFuns
 
 setExportedFuns :: Map Type.Path Int -> M ()
 setExportedFuns exportedFuns' = M f
-  where f r k genVal work exportedSums exportedFuns = k () genVal work exportedSums exportedFuns'
+  where f r localBinds k genVal work exportedSums exportedFuns = k () genVal work exportedSums exportedFuns'
 
 getExportedSums :: M (Map Type.Path Int)
 getExportedSums = M f
-  where f r k genVal work exportedSums exportedFuns = k exportedSums genVal work exportedSums exportedFuns
+  where f r localBinds k genVal work exportedSums exportedFuns = k exportedSums genVal work exportedSums exportedFuns
 
 setExportedSums :: Map Type.Path Int -> M ()
 setExportedSums exportedSums' = M f
-  where f r k genVal work exportedSums exportedFuns = k () genVal work exportedSums' exportedFuns
+  where f r localBinds k genVal work exportedSums exportedFuns = k () genVal work exportedSums' exportedFuns
 
 gen :: M Simple.Ident
 gen = M f
-  where f r k genVal work exportedFuns = k genVal (genVal + 1) work exportedFuns
+  where f r localBinds k genVal work exportedFuns = k genVal (genVal + 1) work exportedFuns
 
 getWork :: M [M ()]
 getWork = M f
-  where f r k genVal work exportedFuns = k work genVal work exportedFuns
+  where f r localBinds k genVal work exportedFuns = k work genVal work exportedFuns
 
 setWork :: [M ()] -> M ()
 setWork work' = M f
-  where f r k genVal work exportedFuns = k () genVal work' exportedFuns
+  where f r localBinds k genVal work exportedFuns = k () genVal work' exportedFuns
 
 addWork :: M () -> M ()
 addWork m = do
@@ -599,27 +692,27 @@ addWork m = do
 
 addFun :: Simple.Ident -> Simple.Fun -> M ()
 addFun d x = M f
-  where f r k genVal work exportedSums exportedFuns programTags programSums programFuns =
+  where f r localBinds k genVal work exportedSums exportedFuns programTags programSums programFuns =
          k () genVal work exportedSums exportedFuns programTags programSums (IdentMap.insert d x programFuns)
 
 addSum :: Simple.Ident -> Simple.Sum -> M ()
 addSum d x = M f
-  where f r k genVal work exportedSums exportedFuns programTags programSums programFuns =
+  where f r localBinds k genVal work exportedSums exportedFuns programTags programSums programFuns =
          k () genVal work exportedSums exportedFuns programTags (IdentMap.insert d x programSums) programFuns
 
 getProgramTags :: M (Simple.IdentMap Simple.Tag)
 getProgramTags = M f
-  where f r k genVal work exportedSums exportedFuns programTags programSums programFuns =
+  where f r localBinds k genVal work exportedSums exportedFuns programTags programSums programFuns =
          k programTags genVal work exportedSums exportedFuns programTags programSums programFuns
 
 getProgramSums :: M (Simple.IdentMap Simple.Sum)
 getProgramSums = M f
-  where f r k genVal work exportedSums exportedFuns programTags programSums programFuns =
+  where f r localBinds k genVal work exportedSums exportedFuns programTags programSums programFuns =
          k programSums genVal work exportedSums exportedFuns programTags programSums programFuns
 
 getProgramFuns :: M (Simple.IdentMap Simple.Fun)
 getProgramFuns = M f
-  where f r k genVal work exportedSums exportedFuns programTags programSums programFuns =
+  where f r localBinds k genVal work exportedSums exportedFuns programTags programSums programFuns =
          k programFuns genVal work exportedSums exportedFuns programTags programSums programFuns
 
 -- Utility Functions
