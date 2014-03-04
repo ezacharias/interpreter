@@ -2,7 +2,7 @@ module Compiler.Meta where
 
 import Control.Applicative (Alternative, empty, (<|>))
 import Data.Maybe (fromMaybe)
--- import Debug.Trace (trace)
+import Debug.Trace (trace)
 
 import qualified Compiler.Syntax as Syntax
 import qualified Compiler.Type   as Type
@@ -128,6 +128,10 @@ convertPat p =
   case p of
     Syntax.LowerPat pos s ->
       return $ Syntax.LowerPat pos s
+    Syntax.TuplePat pos _ ps -> do
+      ps <- mapM convertPat ps
+      tys <- mapM (const gen) ps
+      return $ Syntax.TuplePat pos tys ps
     Syntax.UnderbarPat ->
       return $ Syntax.UnderbarPat
     Syntax.UnitPat pos ->
@@ -243,13 +247,12 @@ envGetFunWithFields :: Env -> Type.Path -> ([String], Type.Type)
 envGetFunWithFields (Env []) (Type.Path [Type.Name "Continue" _]) = continuePrimitive
 envGetFunWithFields (Env []) (Type.Path [Type.Name "Exit" _]) = exitPrimitive
 envGetFunWithFields (Env []) (Type.Path [Type.Name "Write" _]) = writePrimitive
-envGetFunWithFields (Env []) n = unreachable $ "envGetFunWithFields: " ++ show n
+envGetFunWithFields (Env []) n = unreachable $ "envGetFunWithFields1: " ++ show n
 envGetFunWithFields _ (Type.Path []) = unreachable "envGetFunWithFields 2"
 envGetFunWithFields (Env r@((Just (Type.Path [Type.Name "Escape" [ty1, ty2]]), _, _, _):r')) (Type.Path [Type.Name "Catch" []]) = catchPrimitive ty1 ty2
 envGetFunWithFields (Env r@((Just (Type.Path [Type.Name "Escape" [ty1, ty2]]), _, _, _):r')) (Type.Path [Type.Name "Throw" []]) = throwPrimitive ty1 ty2
-envGetFunWithFields (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetFunWithFields: " ++ show q1
-envGetFunWithFields (Env r@((Nothing, q, _, ds):r')) (Type.Path [Type.Name s1 tys]) = check $ search has ds
-  where check Nothing = unreachable "envGetFunWithFields 3"
+envGetFunWithFields (Env r@((_, q, _, ds):r')) (Type.Path [Type.Name s1 tys]) = check $ search has ds
+  where check Nothing = unreachable "envGetFunWithFields 6"
         check (Just x) = x
         has dec =
           case dec of
@@ -258,8 +261,8 @@ envGetFunWithFields (Env r@((Nothing, q, _, ds):r')) (Type.Path [Type.Name s1 ty
                in Just $ (ss, envSigType r'' ps ty)
             _ ->
               Nothing
-envGetFunWithFields (Env r@((Nothing, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):ns)) = check $ search has ds
-  where check Nothing = unreachable "envGetFunWithFields 4"
+envGetFunWithFields (Env r@((_, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):ns)) = check $ search has ds
+  where check Nothing = unreachable "envGetFunWithFields 7"
         check (Just r'') = envGetFunWithFields r'' (Type.Path ns)
         has dec =
           case dec of
@@ -291,7 +294,7 @@ envConvertType r ty =
     Syntax.UpperTyp _ q tys -> envGetType r (createPath q (map (envConvertType r) tys))
 
 envGetTypeVariable :: Env -> String -> Type.Type
-envGetTypeVariable (Env []) s = unreachable "envGetTypeVariable"
+envGetTypeVariable (Env []) s = unreachable $ "envGetTypeVariable: " ++ s
 envGetTypeVariable (Env ((_, _, xs, _) : r)) s = fromMaybe (envGetTypeVariable (Env r) s) (lookup s xs)
 
 getPatType :: Syntax.Pat -> M Type.Type
@@ -381,14 +384,15 @@ envGetUnitWithName (Env r@((Nothing, q, _, ds):r')) (Type.Name s1 tys) = check $
         has dec =
           case dec of
             Syntax.UnitDec _ s2 s3s ds | s1 == s2 ->
-              Just $ \ q' -> Env ((Just (todo "envGetUnitWithName"), q', zip s3s tys, ds) : r)
+              -- I think we need to change this for applicative.
+              Just $ \ q' -> Env ((Just (Type.pathAddName q (Type.Name s1 tys)), q', zip s3s tys, ds) : r)
             _ ->
               Nothing
 
 envGetUnitWithFields :: Env -> Type.Path -> (Type.Path -> Env)
 envGetUnitWithFields (Env []) _ = unreachable "envGetUnitWithFields"
 envGetUnitWithFields _ (Type.Path []) = unreachable "envGetUnitWithFields"
-envGetUnitWithFields (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetFunWithFields: " ++ show q1
+envGetUnitWithFields (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetUnitWithFields: " ++ show q1
 envGetUnitWithFields (Env r@((Nothing, q, _, ds):r')) (Type.Path [Type.Name s1 tys]) = check $ search has ds
   where check Nothing = unreachable "envGetUnitWithFields"
         check (Just x) = x

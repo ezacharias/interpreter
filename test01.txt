@@ -83,3 +83,39 @@ The minimial program.
 
     Uncurry⟦a, b, c⟧(f : a ⟶ b ⟶ c)(x : a, y : b) : c
       f(x)(y)
+
+    sum Stream⟦s⟧
+      End
+      Next(s)(() ⟶ Stream⟦s⟧)
+
+    unit Generate⟦u⟧
+
+      new E = Escape⟦u, ()⟧
+
+      With(f : () ⟶ ()) : Stream⟦u⟧
+        E.Catch(Compose(Constant(End))(f))(Next)
+
+      Yield(x : u) : ()
+        E.Throw(x)
+
+    mod List
+
+      new G = Generate⟦String⟧
+
+      Each⟦b⟧(xs : List⟦b⟧)(f : b ⟶ ()) : ()
+        ()
+
+ --   Each⟦b⟧(xs : List⟦b⟧)(f : b ⟶ ()) : ()
+ --     case xs
+ --       Nil
+ --         ()
+ --       Cons(x, xs)
+ --         f(x)
+ --         Each(xs)(f)
+
+      ToStream(xs : List⟦String⟧) : Stream⟦String⟧
+        in G.With
+          Each(xs)(Unreachable)
+
+
+
