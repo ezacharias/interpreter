@@ -14,6 +14,7 @@ data Status =
  | EscapeStatus Ident Value
  | UndefinedStatus
  | WriteStatus String Status
+   deriving (Show)
 
 data Value =
    ClosureValue { closureValue :: Value -> M Value }
@@ -21,6 +22,13 @@ data Value =
  | StringValue { stringValue :: String }
  | TupleValue { tupleValues :: [Value] }
  | UnitValue
+
+instance Show Value where
+  show (ClosureValue _) = "closure"
+  show (ConstructorValue i vs) = "constructor " ++ show i ++ " " ++ show (length vs)
+  show (StringValue s) = s
+  show (TupleValue vs) = show (length vs)
+  show UnitValue = "()"
 
 type Env = IntMap Value
 type G = IntMap Fun
@@ -109,16 +117,17 @@ instance Monad M where
   m >>= f = M (\ g r k -> runM m g r (K $ \ x -> runM (f x) g r k))
 
 run :: G -> M Value -> Status
-run g m = runM m g emptyEnv emptyK emptyK1 emptyK2
+run g m = runM m g emptyEnv emptyK (emptyK1 g) emptyK2
 
 emptyK :: K Value
 emptyK = K $ \ v k1 _ -> runK1 k1 v
 
-emptyK1 :: K1
-emptyK1 = K1 $ f
+emptyK1 :: G -> K1
+emptyK1 g = K1 $ f
   where f (ConstructorValue 0 []) = ExitStatus
         f (ConstructorValue 1 [StringValue s, x]) = WriteStatus s (f x)
-        f _ = unreachable "Interpreter"
+        f (ConstructorValue 2 [v]) = run g (closureValue v UnitValue)
+        f v = unreachable $ "emptyK1: " ++ show v
 
 emptyK2 :: K2
 emptyK2 = K2 $ \ d k v -> EscapeStatus d v
@@ -134,8 +143,9 @@ catch d1 m f = M $ catch' d1 m f
 
 catch' :: Ident -> M Value -> (Value -> Value -> M Value) -> G -> Env -> K Value -> K1 -> K2 -> Status
 catch' d1 m f g r k k1 k2 = runM m g r emptyK (K1 $ \ v -> runK k v k1 k2) (K2 check)
-  where check d2 k' v | d1 == d2  = let c = ClosureValue $ \ v -> M $ \ _ _ k k1' k2'-> runK k' v (K1 $ \ v' -> runK k v' k1' k2') k2'
-                                     in runM (f c v) g r emptyK (K1 $ \ v -> runK k v k1 k2) (K2 check)
+  where check d2 k' v | d1 == d2  = let c = ClosureValue $ \ v -> M $ \ _ _ k k1' k2'-> runK k' v (K1 $ \ v' -> runK k v' k1' k2') (K2 check)
+                                     in runM (f v c) g r emptyK (K1 $ \ v -> runK k v k1 k2) (K2 check)
+                      | otherwise = error $ (show d1) ++ " " ++ (show d2)
                       | otherwise = runK2 k2 d2 (K $ \ v k1' k2' -> runK k' v (K1 $ \ v' -> runK k v' k1' k2') k2') v
 
 withEnv :: Env -> M a -> M a

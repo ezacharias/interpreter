@@ -18,6 +18,8 @@ The minimial program.
         E.Throw(Constant(R.Exit))
         Unreachable
 
+    new E = Escape⟦(), Output⟧
+
     Main : Output
       in IO.With
         IO.Write("A")

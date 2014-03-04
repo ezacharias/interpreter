@@ -98,6 +98,6 @@ elaborate x = return $ Elaborator.elaborate x
 interpret :: Simple.Program -> Driver ()
 interpret p = check $ Interpreter.interpret p
   where check Interpreter.ExitStatus         = return ()
-        check (Interpreter.EscapeStatus _ _) = DriverError "interpreter: uncaught throw"
-        check Interpreter.UndefinedStatus    = DriverError "interpreter: undefined"
+        check (Interpreter.EscapeStatus _ _) = DriverError "interpreter resulted in an uncaught throw"
+        check Interpreter.UndefinedStatus    = DriverError "interpreter resulted in unreachable"
         check (Interpreter.WriteStatus s x)  = liftIO (putStrLn s) >> check x
