@@ -2,7 +2,7 @@ module Compiler.Meta where
 
 import Control.Applicative (Alternative, empty, (<|>))
 import Data.Maybe (fromMaybe)
-import Debug.Trace (trace)
+-- import Debug.Trace (trace)
 
 import qualified Compiler.Syntax as Syntax
 import qualified Compiler.Type   as Type
@@ -137,22 +137,25 @@ convertPat p =
     Syntax.UnitPat pos ->
       return $ Syntax.UnitPat pos
     Syntax.UpperPat pos _ _ q ps -> do
-      (ty, tys) <- getConstructor (createPath q [])
+      (ss, ty, tys) <- getConstructor (createPath q [])
+      ds <- mapM (const gen) ss
+      ty <- return $ Type.substitute (zip ss ds) ty
+      tys <- return $ map (Type.substitute (zip ss ds)) tys
       ps <- mapM convertPat ps
       return $ Syntax.UpperPat pos tys ty q ps
     _ -> todo $ "convertPat: " ++ show p
 
-getConstructor :: Type.Path -> M (Type.Type, [Type.Type])
+getConstructor :: Type.Path -> M ([String], Type.Type, [Type.Type])
 getConstructor q = do
   r <- getEnv
   return $ envGetConstructor r q
 
-envGetConstructor :: Env -> Type.Path -> (Type.Type, [Type.Type])
+envGetConstructor :: Env -> Type.Path -> ([String], Type.Type, [Type.Type])
 envGetConstructor r (Type.Path [n])    = envGetConstructorWithName r n
 envGetConstructor r (Type.Path (n:ns)) = envGetConstructorWithFields (envGetModWithName r n) (Type.Path ns)
 envGetConstructor r (Type.Path [])     = unreachable "envGetConstructor"
 
-envGetConstructorWithName :: Env -> Type.Name -> (Type.Type, [Type.Type])
+envGetConstructorWithName :: Env -> Type.Name -> ([String], Type.Type, [Type.Type])
 envGetConstructorWithName (Env []) q = unreachable $ "envGetConstructorWithName: " ++ show q
 envGetConstructorWithName (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetConstructorWithName: " ++ show q1
 envGetConstructorWithName (Env r@((Nothing, q, _, ds) : r')) (Type.Name s1 tys) = check $ search has ds
@@ -164,14 +167,14 @@ envGetConstructorWithName (Env r@((Nothing, q, _, ds) : r')) (Type.Name s1 tys) 
               let hasConstructor (_, s3, tys) | s1 == s3 =
                     let tys' = map (envConvertType (envAddTypeVariables (Env r) ss)) tys
                         ty' = Type.Variant (Type.pathAddName q (Type.Name s2 (map Type.Variable ss)))
-                     in Just (ty', tys')
+                     in Just (ss, ty', tys')
                   hasConstructor _ =
                     Nothing
                in search hasConstructor cs
             _ ->
               Nothing
 
-envGetConstructorWithFields :: Env -> Type.Path -> (Type.Type, [Type.Type])
+envGetConstructorWithFields :: Env -> Type.Path -> ([String], Type.Type, [Type.Type])
 envGetConstructorWithFields r q = todo "envGetConstructorWithFields"
 
 -- Returns the type paramaters and the full type of the function.
@@ -257,7 +260,7 @@ envGetFunWithFields (Env r@((_, q, _, ds):r')) (Type.Path [Type.Name s1 tys]) = 
         has dec =
           case dec of
             Syntax.FunDec _ ty0s ty0 s2 ss ps ty t | s1 == s2 ->
-              let r'' = Env ((Nothing, Type.Path [], map (\ s -> (s, Type.Variable s)) ss, []) : r')
+              let r'' = Env ((Nothing, Type.Path [], map (\ s -> (s, Type.Variable s)) ss, []) : r)
                in Just $ (ss, envSigType r'' ps ty)
             _ ->
               Nothing
@@ -328,8 +331,8 @@ envGetTypeWithName :: Env -> Type.Name -> Type.Type
 envGetTypeWithName (Env []) (Type.Name "Output" []) = Type.Variant (Type.Path [Type.Name "Output" []])
 envGetTypeWithName (Env []) (Type.Name "String" []) = Type.String
 envGetTypeWithName (Env []) x = unreachable $ "envGetTypeWithName 1: " ++ show x
-envGetTypeWithName (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetTypeWithName 2: " ++ show q1
-envGetTypeWithName (Env r@((Nothing, q, _, ds):r')) (Type.Name s1 tys) = check $ search has ds
+-- envGetTypeWithName (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetTypeWithName 2: " ++ show q2
+envGetTypeWithName (Env r@((_, q, _, ds):r')) (Type.Name s1 tys) = check $ search has ds
   where check Nothing = envGetTypeWithName (Env r') (Type.Name s1 tys)
         check (Just x) = x
         has dec =

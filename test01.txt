@@ -101,21 +101,16 @@ The minimial program.
     mod List
 
       new G = Generate⟦String⟧
+ --   new G⟦a⟧ = Generate⟦a⟧
 
       Each⟦b⟧(xs : List⟦b⟧)(f : b ⟶ ()) : ()
-        ()
-
- --   Each⟦b⟧(xs : List⟦b⟧)(f : b ⟶ ()) : ()
- --     case xs
- --       Nil
- --         ()
- --       Cons(x, xs)
- --         f(x)
- --         Each(xs)(f)
+        case xs
+          Nil
+            ()
+          Cons(x, xs)
+            f(x)
+            Each(xs)(f)
 
       ToStream(xs : List⟦String⟧) : Stream⟦String⟧
         in G.With
-          Each(xs)(Unreachable)
-
-
-
+          Each(xs)(G.Yield)
