@@ -4,6 +4,7 @@ import           Data.IntMap     (IntMap)
 import qualified Data.IntMap     as IntMap
 import           Data.Maybe      (fromMaybe)
 import           Prelude         hiding (catch)
+import Debug.Trace (trace)
 
 import           Compiler.Simple
 
@@ -43,8 +44,9 @@ eval t =
   case t of
     ApplyTerm t1 t2 -> do
       v1 <- eval t1
+      trace (show v1) (return ())
       v2 <- eval t2
-      closureValue v1 v2
+      closureValue (trace (show v1) v1) v2
     BindTerm d t1 t2 -> do
       v1 <- eval t1
       bind [(d, v1)] (eval t2)
@@ -85,9 +87,6 @@ eval t =
     VariableTerm d ->
       getValue d
 
-emptyEnv :: Env
-emptyEnv = IntMap.empty
-
 bind :: [(Ident, Value)] -> M a -> M a
 bind ps m = do
   r <- getEnv
@@ -104,57 +103,73 @@ getFun d = do
   let Fun _ t = fromMaybe (unreachable "getFun") (IntMap.lookup d g)
   return t
 
-newtype M a = M { runM :: G -> Env -> K a -> K1 -> K2 -> Status }
+newtype M a = M { runM :: G -> Env -> K4 -> K3 -> K2 a -> K1 -> Status }
 
-newtype K a = K { runK :: a -> K1 -> K2 -> Status }
+-- The handler for the nearest catch.
+type K4 = K3 -> K2 Value -> K1 -> Ident -> Value -> Status
 
-newtype K1 = K1 { runK1 :: Value -> Status }
+-- The parent handler for the nearest catch.
+type K3 = K2 Value -> K1 -> Ident -> Value -> Status
 
-newtype K2 = K2 { runK2 :: Ident -> K Value -> Value -> Status }
+-- The delimited continuation to the nearest catch.
+type K2 a = K1 -> a -> Status
+
+-- The continuation of the nearest catch.
+type K1 = Value -> Status
 
 instance Monad M where
-  return x = M (\ _ _ k k1 k2 -> runK k x k1 k2)
-  m >>= f = M (\ g r k -> runM m g r (K $ \ x -> runM (f x) g r k))
+  return x = M $ \ _ _ _ _ k2 k1 -> k2 k1 x
+  m >>= f = M $ \ g r k4 k3 k2 k1 -> runM m g r k4 k3 (\ k1 x -> runM (f x) g r k4 k3 k2 k1) k1
 
-run :: G -> M Value -> Status
-run g m = runM m g emptyEnv emptyK (emptyK1 g) emptyK2
+emptyEnv :: Env
+emptyEnv = IntMap.empty
 
-emptyK :: K Value
-emptyK = K $ \ v k1 _ -> runK1 k1 v
+emptyK4 :: K4
+emptyK4 k3 k2 k1 d v = k3 k2 k1 d v
+
+emptyK3 :: K3
+emptyK3 k2 k1 d v = EscapeStatus d v
+
+emptyK2 :: K2 Value
+emptyK2 k1 v = k1 v
 
 emptyK1 :: G -> K1
-emptyK1 g = K1 $ f
-  where f (ConstructorValue 0 []) = ExitStatus
-        f (ConstructorValue 1 [StringValue s, x]) = WriteStatus s (f x)
-        f (ConstructorValue 2 [v]) = run g (closureValue v UnitValue)
-        f v = unreachable $ "emptyK1: " ++ show v
+emptyK1 g (ConstructorValue 0 []) = ExitStatus
+emptyK1 g (ConstructorValue 1 [s, x]) = WriteStatus (stringValue s) (emptyK1 g x)
+emptyK1 g (ConstructorValue 2 [v]) = run g (closureValue v UnitValue)
+emptyK1 g _ = unreachable "emtptyK1"
 
-emptyK2 :: K2
-emptyK2 = K2 $ \ d k v -> EscapeStatus d v
-
-runUnreachable :: M Value
-runUnreachable = M $ \ _ _ _ _ _ -> UndefinedStatus
+run :: G -> M Value -> Status
+run g m = runM m g emptyEnv emptyK4 emptyK3 emptyK2 (emptyK1 g)
 
 throw :: Ident -> Value -> M Value
-throw d v = M $ \ _ _ k _ k2 -> runK2 k2 d k v
+throw d v = M $ \ _ _ k4 k3 k2 k1 -> k4 k3 k2 k1 d v
 
 catch :: Ident -> M Value -> (Value -> Value -> M Value) -> M Value
 catch d1 m f = M $ catch' d1 m f
 
-catch' :: Ident -> M Value -> (Value -> Value -> M Value) -> G -> Env -> K Value -> K1 -> K2 -> Status
-catch' d1 m f g r k k1 k2 = runM m g r emptyK (K1 $ \ v -> runK k v k1 k2) (K2 check)
-  where check d2 k' v | d1 == d2  = let c = ClosureValue $ \ v -> M $ \ _ _ k k1' k2'-> runK k' v (K1 $ \ v' -> runK k v' k1' k2') (K2 check)
-                                        in runM (f v c) g r emptyK (K1 $ \ v -> runK k v k1 k2) (K2 check)
-                      | otherwise = runK2 k2 d2 (K $ \ v k1' k2' -> runK k' v (K1 $ \ v' -> runK k v' k1' k2') k2') v
+catch' :: Ident -> M Value -> (Value -> Value -> M Value) -> G -> Env -> K4 -> K3 -> K2 Value -> K1 -> Status
+catch' d1 m f g r k4 k3 k2 k1 = runM m g r k4' (k4 k3) emptyK2 (k2 k1)
+  where k4' k3' k2' k1' d2 v | d1 == d2 = runM (f v (createClosure k2')) g r k4' k3' emptyK2 k1'
+        k4' k3' k2' k1' d2 v | otherwise = k3' k2' k1' d2 v
+
+createClosure :: K2 Value -> Value
+createClosure k2 = ClosureValue $ \ v -> M $ \ g r k4' k3' k2' k1' -> k2 (k2' k1') v
+
+-- createContinuation :: K Value -> Value
+-- createContinuation k = ClosureValue $ \ v -> M $ \ _ _ k' k1' k2'-> runK k v (K1 $ \ v' -> runK k' v' k1' k2') k2'
+
+runUnreachable :: M Value
+runUnreachable = M $ \ _ _ _ _ _ _ -> UndefinedStatus
 
 withEnv :: Env -> M a -> M a
 withEnv r m = M $ \ g _ -> runM m g r
 
 getEnv :: M Env
-getEnv = M $ \ _ r k -> runK k r
+getEnv = M $ \ _ r _ _ k2 k1 -> k2 k1 r
 
 getG :: M G
-getG = M $ \ g _ k -> runK k g
+getG = M $ \ g _ _ _ k2 k1 -> k2 k1 g
 
 todo :: String -> a
 todo s = error $ "todo: Interpreter." ++ s
