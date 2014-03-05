@@ -24,16 +24,12 @@ The minimial program.
 
     Main : Output
       in IO.With
-        IO.Write("1")
-        IO.Write("2")
         in B.With("A")
-          IO.Write("3")
- --     IO.Write("4")
- --       IO.Write(B.Get)
- --       B.Set("B")
- --       IO.Write(B.Get)
- --       B.Set("C")
- --       IO.Write(B.Get)
+          IO.Write(B.Get)
+          B.Set("B")
+          IO.Write(B.Get)
+          B.Set("C")
+          IO.Write(B.Get)
 
     unit Box⟦t⟧
 
