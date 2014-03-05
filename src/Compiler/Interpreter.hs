@@ -144,8 +144,7 @@ catch d1 m f = M $ catch' d1 m f
 catch' :: Ident -> M Value -> (Value -> Value -> M Value) -> G -> Env -> K Value -> K1 -> K2 -> Status
 catch' d1 m f g r k k1 k2 = runM m g r emptyK (K1 $ \ v -> runK k v k1 k2) (K2 check)
   where check d2 k' v | d1 == d2  = let c = ClosureValue $ \ v -> M $ \ _ _ k k1' k2'-> runK k' v (K1 $ \ v' -> runK k v' k1' k2') (K2 check)
-                                     in runM (f v c) g r emptyK (K1 $ \ v -> runK k v k1 k2) (K2 check)
-                      | otherwise = error $ (show d1) ++ " " ++ (show d2)
+                                        in runM (f v c) g r emptyK (K1 $ \ v -> runK k v k1 k2) (K2 check)
                       | otherwise = runK2 k2 d2 (K $ \ v k1' k2' -> runK k' v (K1 $ \ v' -> runK k v' k1' k2') k2') v
 
 withEnv :: Env -> M a -> M a

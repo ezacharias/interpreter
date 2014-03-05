@@ -2,10 +2,13 @@ module Compiler.Meta where
 
 import Control.Applicative (Alternative, empty, (<|>))
 import Data.Maybe (fromMaybe)
--- import Debug.Trace (trace)
+import Debug.Trace (trace)
 
 import qualified Compiler.Syntax as Syntax
 import qualified Compiler.Type   as Type
+
+tr :: Show a => a -> a
+tr x = trace (show x) x
 
 addMetavariables :: Syntax.Program -> Syntax.Program
 addMetavariables p = convertProgram (programEnv p) p
@@ -126,6 +129,9 @@ convertRule (pat, t) = do
 convertPat :: Syntax.Pat -> M Syntax.Pat
 convertPat p =
   case p of
+    Syntax.AscribePat pos p ty -> do
+      p <- convertPat p
+      return $ Syntax.AscribePat pos p ty
     Syntax.LowerPat pos s ->
       return $ Syntax.LowerPat pos s
     Syntax.TuplePat pos _ ps -> do
@@ -143,7 +149,6 @@ convertPat p =
       tys <- return $ map (Type.substitute (zip ss ds)) tys
       ps <- mapM convertPat ps
       return $ Syntax.UpperPat pos tys ty q ps
-    _ -> todo $ "convertPat: " ++ show p
 
 getConstructor :: Type.Path -> M ([String], Type.Type, [Type.Type])
 getConstructor q = do
@@ -215,7 +220,7 @@ envGetFunWithName (Env r@((Nothing, q, _, ds) : r')) (Type.Name s1 tys) = check 
         has dec =
           case dec of
             Syntax.FunDec _ ty0s ty0 s2 ss ps ty t | s1 == s2 ->
-              let r'' = Env ((Nothing, Type.Path [], map (\ s -> (s, Type.Variable s)) ss, []) : r')
+              let r'' = Env ((Nothing, Type.Path [], map (\ s -> (s, Type.Variable s)) ss, []) : r)
                in Just $ (ss, envSigType r'' ps ty)
             Syntax.SumDec _ s2 ss cs ->
               let hasConstructor (_, s3, tys) | s1 == s3 =

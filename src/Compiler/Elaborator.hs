@@ -240,7 +240,7 @@ envGetModWithName (Env r@((_, q, _, ds):r')) (Type.Name s1 tys) = check $ search
             Syntax.ModDec _ s2 ds | s1 == s2 ->
               Just (Env ((Nothing, Type.pathAddName q (Type.Name s1 []) , [], ds) : r))
             Syntax.NewDec _ ty2s s2 s3s _ | s1 == s2 ->
-              Just (envGetUnit (Env r) (convertQual s3s ty2s) (Type.pathAddName q (Type.Name s1 tys)))
+              Just (envGetUnit (Env r) (convertQual s3s (map (envUpdateType (Env r)) ty2s)) (Type.pathAddName q (Type.Name s1 tys)))
             Syntax.SubDec _ s2 q2 | s1 == s2 ->
               -- Note that r' is used because alias lookup starts at the outer level.
               Just (envGetMod (Env r') (convertQual q2 []))
@@ -258,7 +258,7 @@ envGetModWithFields (Env r@((_, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):ns
             Syntax.ModDec _ s2 ds | s1 == s2 ->
               Just (Env ((Nothing, Type.pathAddName q (Type.Name s1 tys), [], ds) : r))
             Syntax.NewDec _ ty2s s2 s3s _ | s1 == s2 ->
-              Just (envGetUnit (Env r) (convertQual s3s ty2s) (Type.pathAddName q (Type.Name s1 tys)))
+              Just (envGetUnit (Env r) (convertQual s3s (map (envUpdateType (Env r)) ty2s)) (Type.pathAddName q (Type.Name s1 tys)))
             _ ->
               Nothing
 
@@ -304,7 +304,7 @@ envGetUnitWithFields (Env r@((_, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):n
             Syntax.ModDec _ s2 ds | s1 == s2 ->
               Just (Env ((Nothing, Type.pathAddName q (Type.Name s1 tys), [], ds) : r))
             Syntax.NewDec _ ty2s s2 s3s _ | s1 == s2 ->
-              Just (envGetUnit (Env r) (convertQual s3s ty2s) (Type.pathAddName q (Type.Name s1 tys)))
+              Just (envGetUnit (Env r) (convertQual s3s (map (envUpdateType (Env r)) ty2s)) (Type.pathAddName q (Type.Name s1 tys)))
             -- Should units support aliases?
             _ ->
               Nothing
@@ -360,7 +360,7 @@ elaborateType ty =
       ty2 <- elaborateType ty2
       return $ Simple.ArrowType ty1 ty2
     Type.Metavariable _ ->
-      unreachable "elaborateType"
+      unreachable $ "elaborateType: " ++ show ty
     Type.String ->
       return $ Simple.StringType
     Type.Tuple tys -> do
@@ -369,7 +369,7 @@ elaborateType ty =
     Type.Unit ->
        return $ Simple.UnitType
     Type.Variable x ->
-      unreachable "elaborateType"
+      unreachable $ "elaborateType: " ++ show ty
     Type.Variant q -> do
       d <- getSum q
       return $ Simple.SumType d
@@ -504,7 +504,8 @@ elaborateTerm t =
           d <- gen
           t2 <- elaborateTerm t2
           return $ Simple.LambdaTerm d Simple.UnitType t2
-        Just ps ->
+        Just ps -> do
+          tys <- mapM updateType tys
           elaborateLambda ps tys t2
       return $ Simple.ApplyTerm t1 t2
     Syntax.SeqTerm t1 t2 -> do
@@ -516,8 +517,8 @@ elaborateTerm t =
       return $ Simple.StringTerm x
     Syntax.UnitTerm _ ->
       return $ Simple.UnitTerm
---    Syntax.UpperTerm _ [] _ ["Exit"] Nothing ->
     Syntax.UpperTerm _ tys _ ss _ -> do
+      tys <- mapM updateType tys
       d <- getFun (convertQual ss tys)
       return $ Simple.FunTerm d
     Syntax.VariableTerm _ s -> do

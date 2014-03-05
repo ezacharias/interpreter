@@ -20,10 +20,40 @@ The minimial program.
 
     new E = Escape⟦(), Output⟧
 
+    new B = Box⟦String⟧
+
     Main : Output
       in IO.With
-        IO.Write("A")
-        IO.Write("B")
+        in B.With("A")
+          IO.Write(B.Get)
+          B.Set("B")
+          IO.Write(B.Get)
+          B.Set("C")
+          IO.Write(B.Get)
+
+    unit Box⟦t⟧
+
+      new S = Escape⟦t ⟶ t, t⟧
+
+      With⟦a⟧(x : t)(f : () ⟶ a) : a
+        bind fold : t ⟶ a to for (modify : t ⟶ t)(k : t ⟶ (t ⟶ a))(x : t) in S.Catch(A(f))
+          k(x)(modify(x))
+        fold(x)
+
+      A⟦a⟧(f : () ⟶ a)() : t ⟶ a
+        Constant(f())
+
+      Modify(f : t ⟶ t) : t
+        S.Throw(f)
+
+      Get : t
+        Modify(Identity)
+
+      Set(x : t) : ()
+        Ignore(Modify(Constant(x)))
+
+    Ignore⟦a⟧(x : a) : ()
+      ()
 
     unit Get⟦t⟧
 
@@ -97,6 +127,12 @@ The minimial program.
 
       Yield(x : u) : ()
         E.Throw(x)
+
+ -- mod Channel
+ --   sum T
+ --   Self : T
+ --   Command⟦a⟧(x : T)(f : () ⟶ a) : a
+ --   Serve : ()
 
     mod List
 
