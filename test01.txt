@@ -25,9 +25,14 @@ The minimial program.
     Main : Output
       in IO.With
         in B.With("A")
+          IO.Write("1")
+          IO.Write("5")
           IO.Write(B.Get)
+          IO.Write("2")
           B.Set("B")
+          IO.Write("3")
           IO.Write(B.Get)
+          IO.Write("4")
           B.Set("C")
           IO.Write(B.Get)
 
