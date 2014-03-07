@@ -1,6 +1,22 @@
 The minimial program.
 
 
+
+    unit U⟦a⟧
+
+      F⟦b⟧ : a
+        M.F
+
+      sum T⟦b⟧
+
+    mod M
+
+      F⟦a⟧(x : a) : String
+        "a"
+
+    G : String
+      M.F()
+
     mod IO
 
       sub R ↦ Root

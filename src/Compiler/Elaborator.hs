@@ -1,5 +1,6 @@
 module Compiler.Elaborator where
 
+import           Control.Monad   (MonadPlus, mzero)
 import qualified Data.IntMap     as IdentMap
 import           Data.Map        (Map)
 import qualified Data.Map        as Map
@@ -769,6 +770,70 @@ todo s = error $ "todo: Elaborator." ++ s
 
 unreachable :: String -> a
 unreachable s = error $ "unreachable: Elaborator." ++ s
+
+
+type M2 a = [a]
+
+fooFun :: [Type.Name] -> [Syntax.Dec] -> M2 ()
+fooFun [] _ = unreachable "fooFun"
+fooFun [Type.Name s1 ty1s] d1s = check $ search has d1s
+  where check (Just x) = x
+        check Nothing = unreachable "fooFun"
+        has (Syntax.FunDec _ _ _ s2 _ _ _ _) | s1 == s2 = todo "foofun"
+        has (Syntax.SumDec _ _ _ _) = todo "fooFun"
+        has _ = unreachable "fooFun"
+-- data Dec = FunDec Pos [Type.Type] Type.Type String [String] [Pat] Typ Term
+fooFun (Type.Name s1 ty1s : ns) d1s = check $ search has d1s
+  where check (Just d2s) = undefined
+        check Nothing = unreachable "fooFun"
+        -- We want to add the type bindings to the type enviromnent.
+        has (Syntax.ModDec _ s2 d2s) | s1 == s2 = Just $
+          withTypeBinds vs ty1s (fooFun ns d2s)
+          where vs = undefined
+        has (Syntax.NewDec _ _ s2 _ _) | s1 == s2 = Just $ do
+          n2s <- withPathRename undefined undefined (withTypeBinds vs ty1s (mapM updateName2 n2s))
+          d2s <- getProgramDecs
+          withResetTypeEnv (fooUnit n2s d2s (fooFun ns))
+          where n2s = undefined
+                vs = undefined
+        has _ = unreachable "fooFun"
+
+-- We need to compute the new rename before the current path rename.
+withPathRename :: Type.Path -> Type.Path -> M2 a -> M2 a
+withPathRename q1 q2 m = todo "withPathRename"
+  where s1s = map (\ (Type.Name s _) -> s) (Type.pathNames q1)
+
+-- Replaces the prefix s1s with n2s in n3s if it matches or returns n2s as is.
+renamePath2 :: [String] -> [Type.Name] -> [Type.Name] -> [Type.Name]
+renamePath2 s1s n2s n3s =
+  case pathPrefixMatch s1s n3s of
+    Nothing -> n3s
+    Just n3s' -> n2s ++ n3s'
+
+-- Returns n2s without the prefix if it matches or mzero.
+pathPrefixMatch :: MonadPlus m => [String] -> [Type.Name] -> m [Type.Name]
+pathPrefixMatch [] n2s = return n2s
+pathPrefixMatch (s1 : s1s) [] = mzero
+pathPrefixMatch (s1 : s1s) (Type.Name s2 _ : n2s) | s1 == s2 = pathPrefixMatch s1s n2s
+pathPrefixMatch (s1 : s1s) (Type.Name s2 _ : n2s) | otherwise = mzero
+
+-- removes any type variables in the name
+updateName2 :: Type.Name -> M2 Type.Name
+updateName2 = undefined
+
+getProgramDecs :: M2 [Syntax.Dec]
+getProgramDecs = undefined
+
+withTypeBinds :: [String] -> [Type.Type] -> M2 a -> M2 a
+withTypeBinds = undefined
+
+withResetTypeEnv :: M2 a -> M2 a
+withResetTypeEnv = undefined
+
+-- Run the monad in the unit.
+fooUnit :: [Type.Name] -> [Syntax.Dec] -> ([Syntax.Dec] -> M2 ()) -> M2 ()
+fooUnit = undefined
+
 
 {-
 type M a = [a]

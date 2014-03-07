@@ -193,19 +193,6 @@ envGetFun r (Type.Path [n])    = envGetFunWithName r n
 envGetFun r (Type.Path (n:ns)) = envGetFunWithFields (envGetModWithName r n) (Type.Path ns)
 envGetFun r (Type.Path [])     = unreachable "envGetFun"
 
-exitPrimitive :: ([String], Type.Type)
-exitPrimitive = ([], Type.Variant (Type.Path [Type.Name "Output" []]))
-
-writePrimitive :: ([String], Type.Type)
-writePrimitive = ([], Type.Arrow Type.String
-                                 (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
-                                             (Type.Variant (Type.Path [Type.Name "Output" []]))))
-
-continuePrimitive :: ([String], Type.Type)
-continuePrimitive = ([], Type.Arrow (Type.Arrow Type.Unit
-                                                (Type.Variant (Type.Path [Type.Name "Output" []])))
-                                    (Type.Variant (Type.Path [Type.Name "Output" []])))
-
 -- Should this check the static path?
 envGetFunWithName :: Env -> Type.Name -> ([String], Type.Type)
 envGetFunWithName (Env []) (Type.Name "Continue" _) = continuePrimitive
@@ -232,24 +219,6 @@ envGetFunWithName (Env r@((Nothing, q, _, ds) : r')) (Type.Name s1 tys) = check 
                in search hasConstructor cs
             _ ->
               Nothing
-
-catchPrimitive :: Type.Type -> Type.Type -> ([String], Type.Type)
-catchPrimitive ty1 ty2 =
-  ( ["c"]
-  , Type.Arrow (Type.Arrow Type.Unit
-                           (Type.Variable "c"))
-               (Type.Arrow (Type.Arrow ty1
-                                       (Type.Arrow (Type.Arrow ty2
-                                                               (Type.Variable "c"))
-                                                   (Type.Variable "c")))
-                           (Type.Variable "c"))
-  )
-
-throwPrimitive :: Type.Type -> Type.Type -> ([String], Type.Type)
-throwPrimitive ty1 ty2 =
-  ( []
-  , Type.Arrow ty1 ty2
-  )
 
 envGetFunWithFields :: Env -> Type.Path -> ([String], Type.Type)
 envGetFunWithFields (Env []) (Type.Path [Type.Name "Continue" _]) = continuePrimitive
@@ -281,6 +250,37 @@ envGetFunWithFields (Env r@((_, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):ns
                 in Just $ envGetUnit (Env r) q'' (Type.pathAddName q (Type.Name s1 tys))
             _ ->
               Nothing
+
+exitPrimitive :: ([String], Type.Type)
+exitPrimitive = ([], Type.Variant (Type.Path [Type.Name "Output" []]))
+
+writePrimitive :: ([String], Type.Type)
+writePrimitive = ([], Type.Arrow Type.String
+                                 (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
+                                             (Type.Variant (Type.Path [Type.Name "Output" []]))))
+
+continuePrimitive :: ([String], Type.Type)
+continuePrimitive = ([], Type.Arrow (Type.Arrow Type.Unit
+                                                (Type.Variant (Type.Path [Type.Name "Output" []])))
+                                    (Type.Variant (Type.Path [Type.Name "Output" []])))
+
+catchPrimitive :: Type.Type -> Type.Type -> ([String], Type.Type)
+catchPrimitive ty1 ty2 =
+  ( ["c"]
+  , Type.Arrow (Type.Arrow Type.Unit
+                           (Type.Variable "c"))
+               (Type.Arrow (Type.Arrow ty1
+                                       (Type.Arrow (Type.Arrow ty2
+                                                               (Type.Variable "c"))
+                                                   (Type.Variable "c")))
+                           (Type.Variable "c"))
+  )
+
+throwPrimitive :: Type.Type -> Type.Type -> ([String], Type.Type)
+throwPrimitive ty1 ty2 =
+  ( []
+  , Type.Arrow ty1 ty2
+  )
 
 envSigType :: Env -> [Syntax.Pat] -> Syntax.Typ -> Type.Type
 envSigType r [] ty = envConvertType r ty
