@@ -51,11 +51,11 @@ data Pat = AscribePat Pos Type.Type Pat Type
           -- ^ Full path of the constructor, constructor argument types, constructor return type.
            deriving (Eq, Show)
 
-data Type = ArrowTyp Type Type
-         | LowerTyp String
-         | TupleTyp [Type]
-         | UnitTyp Pos
-         | UpperTyp Pos Path
+data Type = ArrowType Type Type
+         | LowerType String
+         | TupleType [Type]
+         | UnitType Pos
+         | UpperType Pos Path
            deriving (Eq, Show)
 
 -- | Position filename line col.
@@ -77,12 +77,12 @@ patType (UnitPat _)       = Type.Unit
 patType (UpperPat _ _ _ _ _ _) = error "Syntax.patType: not yet supported"
 
 typeType :: Type -> Type.Type
-typeType (ArrowTyp ty1 ty2)  = Type.Arrow (typeType ty1) (typeType ty2)
-typeType (LowerTyp s)        = Type.Variable s
-typeType (TupleTyp tys)      = Type.Tuple (map typeType tys)
-typeType (UnitTyp _)         = Type.Unit
-typeType (UpperTyp _ [("String", [])]) = Type.String -- fix this
-typeType (UpperTyp _ q) = Type.Variant (createPath q)
+typeType (ArrowType ty1 ty2)  = Type.Arrow (typeType ty1) (typeType ty2)
+typeType (LowerType s)        = Type.Variable s
+typeType (TupleType tys)      = Type.Tuple (map typeType tys)
+typeType (UnitType _)         = Type.Unit
+typeType (UpperType _ [("String", [])]) = Type.String -- fix this
+typeType (UpperType _ q) = Type.Variant (createPath q)
 
 createPath :: Path -> Type.Path
 createPath q = Type.Path (map f q)

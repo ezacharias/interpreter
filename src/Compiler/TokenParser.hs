@@ -3,9 +3,8 @@ module Compiler.TokenParser
   , tokenParser
   ) where
 
-import           Control.Applicative (Alternative, Applicative, empty, many, optional,
+import           Control.Applicative (Alternative, Applicative, empty, many,
                                       pure, some, (<*>), (<|>))
-import  Data.Maybe (fromMaybe)
 import           Control.Monad
 import           Data.Foldable       (asum)
 
@@ -31,12 +30,12 @@ envWith :: Env -> [String] -> Env
 envWith (Env ss1) ss2 = Env (ss2 ++ ss1)
 
 patLocals :: Syntax.Pat -> [String]
-patLocals (Syntax.AscribePat _ p _)    = patLocals p
-patLocals (Syntax.LowerPat _ s)        = [s]
-patLocals (Syntax.TuplePat _ _ ps)     = concat (map patLocals ps)
-patLocals Syntax.UnderbarPat           = []
-patLocals (Syntax.UnitPat _)           = []
-patLocals (Syntax.UpperPat _ _ _ _ ps) = concat (map patLocals ps)
+patLocals (Syntax.AscribePat _ _ p _)    = patLocals p
+patLocals (Syntax.LowerPat _ s)          = [s]
+patLocals (Syntax.TuplePat _ _ ps)       = concat (map patLocals ps)
+patLocals Syntax.UnderbarPat             = []
+patLocals (Syntax.UnitPat _)             = []
+patLocals (Syntax.UpperPat _ _ _ _ _ ps) = concat (map patLocals ps)
 
 withPatLocals :: Syntax.Pat -> AmbiguousParser a -> AmbiguousParser a
 withPatLocals pat p = do
@@ -181,10 +180,15 @@ dotUpper = do
     DotUpperToken x -> return x
     _ -> failurePos pos
 
-qual :: AmbiguousParser Syntax.Qual
-qual = do x <- upper
-          xs <- many dotUpper
-          return $ x:xs
+path :: AmbiguousParser Syntax.Path
+path = do
+  x1 <- upper
+  x2s <- typeArguments0
+  x3s <- many $ do
+    x4 <- dotUpper
+    x5s <- typeArguments0
+    return (x4, x5s)
+  return $ (x1, x2s) : x3s
 
 leftBracket :: AmbiguousParser ()
 leftBracket = isToken LeftBracketToken
@@ -238,12 +242,17 @@ keyword s1 = do
     LowerToken s2 | s1 == s2 && not (elem s1 (envVal r)) -> return ()
     _ -> failurePos pos
 
-typArguments :: AmbiguousParser [Syntax.Typ]
-typArguments = do
+typeArguments :: AmbiguousParser [Syntax.Type]
+typeArguments = do
   leftBracket
   e <- liftM2 (:) typ0 (many $ comma >> typ0)
   rightBracket
   return e
+
+typeArguments0 :: AmbiguousParser [Syntax.Type]
+typeArguments0 = choice [ typeArguments
+                        , return []
+                        ]
 
 typParameters :: AmbiguousParser [String]
 typParameters = do
@@ -256,9 +265,7 @@ funDec :: AmbiguousParser Syntax.Dec
 funDec = do
   pos@(Syntax.Pos _ _ c) <- position
   e1 <- upper
-  e2 <- choice [ typParameters
-               , return []
-               ]
+  e2 <- optional0 typParameters
   e3 <- many pat3
   colon
   e4 <- typ0
@@ -308,13 +315,13 @@ rule = do
 
 forStm :: Int -> AmbiguousParser Syntax.Term
 forStm c = do
-  x1 <- optional $ do
+  x1 <- optional0 $ do
     keyword "for"
     many pat3
   x2 <- do
     keyword "in"
     term2
-  x3 <- withPatsLocals (maybe [] id x1) (indented (c + 2) stm0)
+  x3 <- withPatsLocals x1 (indented (c + 2) stm0)
   return $ Syntax.ForTerm [Type.Unit] Type.Unit x1 x2 x3
 
 term0 :: AmbiguousParser Syntax.Term
@@ -329,7 +336,7 @@ ascribeTerm t = do
   pos <- position
   colon
   ty <- typ0
-  return $ Syntax.AscribeTerm pos t ty
+  return $ Syntax.AscribeTerm pos Type.Unit t ty
 
 term1 :: AmbiguousParser Syntax.Term
 term1 = term2
@@ -357,9 +364,8 @@ exp3 = choice [ do pos <- position
                    else
                      failurePosMsg pos $ "Unbound variable " ++ x ++ "."
               , do pos <- position
-                   x1 <- qual
-                   x2s <- optional typArguments
-                   return $ Syntax.UpperTerm pos [] Type.Unit x1 (fromMaybe [] x2s)
+                   x <- path
+                   return $ Syntax.UpperTerm pos (Type.Path []) Type.Unit x
               , do pos <- position
                    x <- string
                    return $ Syntax.StringTerm pos x
@@ -390,7 +396,7 @@ pat0 = do
   choice [ do pos <- position
               colon
               ty <- typ0
-              return $ Syntax.AscribePat pos p ty
+              return $ Syntax.AscribePat pos Type.Unit p ty
          , return p
          ]
 
@@ -403,9 +409,9 @@ pat1 =
 upperPat :: AmbiguousParser Syntax.Pat
 upperPat = do
   pos <- position
-  s <- qual
+  q <- path
   ps <- many pat3
-  return $ Syntax.UpperPat pos [] Type.Unit s ps
+  return $ Syntax.UpperPat pos (Type.Path []) [] Type.Unit q ps
 
 pat2 :: AmbiguousParser Syntax.Pat
 pat2 =
@@ -437,20 +443,20 @@ pat3 =
               return p
          ]
 
-typ0 :: AmbiguousParser Syntax.Typ
+typ0 :: AmbiguousParser Syntax.Type
 typ0 = do
   ty <- typ1
   tys <- many $ rightArrow >> typ1
-  return $ foldr1 Syntax.ArrowTyp (ty:tys)
+  return $ foldr1 Syntax.ArrowType (ty:tys)
 
-typ1 :: AmbiguousParser Syntax.Typ
+typ1 :: AmbiguousParser Syntax.Type
 typ1 = do
   choice [ lowerTyp
          , upperTyp
          , typ2
          ]
 
-typ2 :: AmbiguousParser Syntax.Typ
+typ2 :: AmbiguousParser Syntax.Type
 typ2 = do
   choice [ tupleTyp
          , unitTyp
@@ -460,33 +466,30 @@ typ2 = do
               return ty
          ]
 
-lowerTyp :: AmbiguousParser Syntax.Typ
-lowerTyp = liftM Syntax.LowerTyp lower
+lowerTyp :: AmbiguousParser Syntax.Type
+lowerTyp = liftM Syntax.LowerType lower
 
 
-tupleTyp :: AmbiguousParser Syntax.Typ
+tupleTyp :: AmbiguousParser Syntax.Type
 tupleTyp = do
   leftParen
   ty <- typ0
   tys <- some $ comma >> typ0
   rightParen
-  return $ Syntax.TupleTyp (ty:tys)
+  return $ Syntax.TupleType (ty:tys)
 
-unitTyp :: AmbiguousParser Syntax.Typ
+unitTyp :: AmbiguousParser Syntax.Type
 unitTyp = do
   pos <- position
   leftParen
   rightParen
-  return $ Syntax.UnitTyp pos
+  return $ Syntax.UnitType pos
 
-upperTyp :: AmbiguousParser Syntax.Typ
+upperTyp :: AmbiguousParser Syntax.Type
 upperTyp = do
   pos <- position
-  e1 <- qual
-  e2 <- choice [ typArguments
-               , return []
-               ]
-  return $ Syntax.UpperTyp pos e1 e2
+  x <- path
+  return $ Syntax.UpperType pos x
 
 undefinedPosition :: Syntax.Pos
 undefinedPosition = Syntax.Pos "" 0 0
@@ -502,7 +505,7 @@ sumDec = do
   e3 <- many $ indented (c + 2) constructor
   return $ Syntax.SumDec pos e1 e2 e3
 
-constructor :: AmbiguousParser (Syntax.Pos, String, [Syntax.Typ])
+constructor :: AmbiguousParser (Syntax.Pos, String, [Syntax.Type])
 constructor = do
   pos <- position
   e1 <- upper
@@ -513,30 +516,30 @@ modDec :: AmbiguousParser Syntax.Dec
 modDec = do
   pos@(Syntax.Pos _ _ c) <- position
   keyword "mod"
-  e1 <- upper
-  e2 <- many $ indented (c + 2) dec
-  return $ Syntax.ModDec pos e1 e2
+  x1 <- upper
+  x2 <- optional0 typParameters
+  x3 <- many $ indented (c + 2) dec
+  return $ Syntax.ModDec pos x1 x2 x3
 
 subDec :: AmbiguousParser Syntax.Dec
 subDec = do
   pos@(Syntax.Pos _ _ c) <- position
   keyword "sub"
-  e1 <- upper
+  x1 <- upper
+  x2 <- optional0 typParameters
   isToken RightCapArrowToken
-  e2 <- qual
-  return $ Syntax.SubDec pos e1 e2
+  x3 <- path
+  return $ Syntax.SubDec pos x1 x2 x3
 
 newDec :: AmbiguousParser Syntax.Dec
 newDec = do
   pos <- position
   keyword "new"
-  e1 <- upper
+  x1 <- upper
+  x2 <- optional0 typParameters
   equals
-  e2 <- qual
-  e3 <- choice [ typArguments
-               , return []
-               ]
-  return $ Syntax.NewDec pos [] e1 e2 e3
+  x3 <- path
+  return $ Syntax.NewDec pos (Type.Path []) x1 x2 x3
 
 unitDec :: AmbiguousParser Syntax.Dec
 unitDec = do
@@ -548,3 +551,6 @@ unitDec = do
                ]
   e3 <- many $ indented (c + 2) dec
   return $ Syntax.UnitDec pos e1 e2 e3
+
+optional0 :: Alternative f => f [a] -> f [a]
+optional0 x = x <|> pure []
