@@ -46,21 +46,21 @@ inferDec (Syntax.FunDec pos ty0s ty0 s ss ps ty t) = do
     Right t -> Right $ Syntax.FunDec pos ty0s ty0 s ss ps ty t
   where g = either (\ _ -> error "impossible") id $ gammaWithPats g sigmaEmpty ps ty0s
 
-inferDec (Syntax.ModDec pos s ds) =
+inferDec (Syntax.ModDec pos s vs ds) =
   case inferDecs ds of
     Left msg -> Left msg
-    Right ds -> Right $ Syntax.ModDec pos s ds
+    Right ds -> Right $ Syntax.ModDec pos s vs ds
 
 inferDec (Syntax.NewDec pos tys' s1 s2 tys) =
   Right $ Syntax.NewDec pos tys' s1 s2 tys
 
-inferDec (Syntax.UnitDec pos s tys ds) =
+inferDec (Syntax.UnitDec pos s vs ds) =
   case inferDecs ds of
     Left msg -> Left msg
-    Right ds -> Right $ Syntax.UnitDec pos s tys ds
+    Right ds -> Right $ Syntax.UnitDec pos s vs ds
 
-inferDec (Syntax.SubDec pos x1 x2) =
-  Right $ Syntax.SubDec pos x1 x2
+inferDec (Syntax.SubDec pos x1 vs x2) =
+  Right $ Syntax.SubDec pos x1 vs x2
 
 
 inferDecs :: [Syntax.Dec] -> Either String [Syntax.Dec]
@@ -75,12 +75,12 @@ inferDecs (d:ds) =
 
 
 gammaWithPat :: Gamma -> Sigma -> Syntax.Pat -> Type.Type -> Either String Gamma
-gammaWithPat g s (Syntax.AscribePat _ p _)      ty = gammaWithPat g s p ty
+gammaWithPat g s (Syntax.AscribePat _ _ p _)    ty = gammaWithPat g s p ty
 gammaWithPat g s (Syntax.LowerPat pos n)        ty = gammaWithLowerPat g s pos n ty
 gammaWithPat g s (Syntax.TuplePat _ _ ps)       ty = gammaWithPats g s ps (Type.tupleElems ty)
 gammaWithPat g s Syntax.UnderbarPat             ty = Right g
 gammaWithPat g s (Syntax.UnitPat _)             ty = Right g
-gammaWithPat g s (Syntax.UpperPat _ tys _ _ ps) ty = gammaWithPats g s ps tys
+gammaWithPat g s (Syntax.UpperPat _ _ tys _ _ ps) ty = gammaWithPats g s ps tys
 
 
 gammaWithPats :: Gamma -> Sigma -> [Syntax.Pat] -> [Type.Type] -> Either String Gamma
@@ -115,8 +115,8 @@ inferTerm g s ty t = do s <- typeCheckTerm g s ty t
 -- Replaces all metavariables in the term with concrete types.
 
 concreteTerm :: Sigma -> Syntax.Term -> Syntax.Term
-concreteTerm s (Syntax.ApplyTerm m t1 t2)       = Syntax.ApplyTerm (concreteType s m) (concreteTerm s t1) (concreteTerm s t2)
-concreteTerm s (Syntax.AscribeTerm p t ty)      = Syntax.AscribeTerm p (concreteTerm s t) ty
+concreteTerm s (Syntax.ApplyTerm ty' t1 t2)     = Syntax.ApplyTerm (concreteType s ty') (concreteTerm s t1) (concreteTerm s t2)
+concreteTerm s (Syntax.AscribeTerm p ty' t ty)  = Syntax.AscribeTerm p (concreteType s ty') (concreteTerm s t) ty
 concreteTerm s (Syntax.BindTerm m p t1 t2)      = Syntax.BindTerm (concreteType s m) p (concreteTerm s t1) (concreteTerm s t2)
 concreteTerm s (Syntax.CaseTerm m t rs)         = Syntax.CaseTerm (concreteType s m) (concreteTerm s t) (map (concreteRule s) rs)
 concreteTerm s (Syntax.ForTerm m1s m2 ps t1 t2) = Syntax.ForTerm (map (concreteType s) m1s) (concreteType s m2) ps (concreteTerm s t1) (concreteTerm s t2)
@@ -125,12 +125,22 @@ concreteTerm s (Syntax.SeqTerm t1 t2)           = Syntax.SeqTerm (concreteTerm s
 concreteTerm s (Syntax.StringTerm p x)          = Syntax.StringTerm p x
 concreteTerm s (Syntax.TupleTerm p ms xs)       = Syntax.TupleTerm p (map (concreteType s) ms) (map (concreteTerm s) xs)
 concreteTerm s (Syntax.UnitTerm p)              = Syntax.UnitTerm p
-concreteTerm s (Syntax.UpperTerm p ts ty x xs)  = Syntax.UpperTerm p (map (concreteType s) ts) (concreteType s ty) x xs
+concreteTerm s (Syntax.UpperTerm p q ty x)      = Syntax.UpperTerm p (concretePath s q) (concreteType s ty) x
 
 
 concreteRule :: Sigma -> (Syntax.Pat, Syntax.Term) -> (Syntax.Pat, Syntax.Term)
 
 concreteRule s (p, t) = (p, concreteTerm s t)
+
+
+concretePath :: Sigma -> Type.Path -> Type.Path
+
+concretePath s (Type.Path ns) = Type.Path (map (concreteName s) ns)
+
+
+concreteName :: Sigma -> Type.Name -> Type.Name
+
+concreteName s (Type.Name x tys) = Type.Name x (map (concreteType s) tys)
 
 
 -- Replaces any metavariables found in sigma. If the metavariable is not in
@@ -174,9 +184,9 @@ updateType s (Type.Variant q)      = Type.Variant (Type.Path (map (\ (Type.Name 
 
 typeCheckPat :: Sigma -> Type.Type -> Syntax.Pat -> Either String Sigma
 
-typeCheckPat s ty (Syntax.AscribePat pos p ty2) =
-  case unify s ty (Syntax.typType ty2) of
-    Nothing -> errorMsg s pos ty (Syntax.typType ty2)
+typeCheckPat s ty (Syntax.AscribePat pos ty2' p ty2) =
+  case unify s ty ty2' of
+    Nothing -> errorMsg s pos ty ty2'
     Just (ty, s) -> typeCheckPat s ty p
 
 typeCheckPat s ty (Syntax.LowerPat _ x) = Right s
@@ -198,7 +208,7 @@ typeCheckPat s ty (Syntax.UnitPat pos) =
     Nothing -> errorMsg s pos ty Type.Unit
     Just (ty, s) -> Right s
 
-typeCheckPat s ty (Syntax.UpperPat pos tys ty2 x ps) =
+typeCheckPat s ty (Syntax.UpperPat pos q tys ty2 x ps) =
   case unify s ty ty2 of
     Nothing -> errorMsg s pos ty ty2
     Just (ty, s) -> fmap (const s) (typeCheckPats s tys ps)
@@ -225,11 +235,10 @@ typeCheckTerm g s ty2 (Syntax.ApplyTerm ty1 t1 t2) =
     Left msg -> Left msg
     Right s -> typeCheckTerm g s ty1 t2
 
-typeCheckTerm g s ty (Syntax.AscribeTerm p t ty2) =
-  let ty2' = Syntax.typType ty2
-   in case unify s ty ty2' of
-        Nothing -> errorMsg s p ty ty2'
-        Just (ty, s) -> typeCheckTerm g s ty t
+typeCheckTerm g s ty (Syntax.AscribeTerm p ty2' t ty2) =
+   case unify s ty ty2' of
+     Nothing -> errorMsg s p ty ty2'
+     Just (ty, s) -> typeCheckTerm g s ty t
 
 typeCheckTerm g s ty (Syntax.BindTerm tyP p t1 t2) =
   case typeCheckPat s tyP p of
@@ -243,13 +252,13 @@ typeCheckTerm g s ty (Syntax.BindTerm tyP p t1 t2) =
             Right g -> typeCheckTerm g s ty t2
 
 typeCheckTerm g s ty (Syntax.ForTerm tyPs ty2 ps t1 t2) =
-  case maybe (Right s) (typeCheckPats s tyPs) ps of
+  case typeCheckPats s tyPs ps of
     Left msg -> Left msg
     Right s ->
       case typeCheckTerm g s (Type.Arrow (foldr Type.Arrow ty2 tyPs) ty) t1 of
         Left msg -> Left msg
         Right s ->
-          case maybe (Right g) (\ ps -> gammaWithPats g s ps tyPs) ps of
+          case gammaWithPats g s ps tyPs of
             Left msg -> Left msg
             Right g -> typeCheckTerm g s ty2 t2
 
@@ -297,7 +306,7 @@ typeCheckTerm g s t (Syntax.UnitTerm p) =
     Nothing -> errorMsg s p t Type.Unit
     Just (t, s) -> Right s
 
-typeCheckTerm g s ty (Syntax.UpperTerm p ts ty2 x xs) =
+typeCheckTerm g s ty (Syntax.UpperTerm p q ty2 x) =
   case unify s ty ty2 of
     Nothing -> errorMsg s p ty ty2
     Just (ty, s) -> Right s

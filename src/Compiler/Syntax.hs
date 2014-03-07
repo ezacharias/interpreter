@@ -8,7 +8,6 @@ data Program = Program [Dec]
 type Name = (String, [Type])
 type Path = [Name]
 
--- Fix sub
 data Dec = FunDec Pos [Type.Type] Type.Type String [String] [Pat] Type Term
          -- ^ Types of parameterns and return type.
          | ModDec Pos String [String] [Dec]
@@ -21,7 +20,8 @@ data Dec = FunDec Pos [Type.Type] Type.Type String [String] [Pat] Type Term
 
 data Term = ApplyTerm Type.Type Term Term
           -- ^ Metavariable for type of the argument.
-          | AscribeTerm Pos Term Type
+          | AscribeTerm Pos Type.Type Term Type
+          -- ^ Type of the type expression.
           | BindTerm Type.Type Pat Term Term
           -- ^ Metavariable for type of the LHS.
           | CaseTerm Type.Type Term [Rule]
@@ -40,7 +40,8 @@ data Term = ApplyTerm Type.Type Term Term
 
 type Rule = (Pat, Term)
 
-data Pat = AscribePat Pos Pat Type
+data Pat = AscribePat Pos Type.Type Pat Type
+         -- ^ Type returned by the ascription.
          | LowerPat Pos String
          | TuplePat Pos [Type.Type] [Pat]
           -- ^ Metavariables for the types of the elements.
@@ -54,8 +55,7 @@ data Type = ArrowTyp Type Type
          | LowerTyp String
          | TupleTyp [Type]
          | UnitTyp Pos
-         | UpperTyp Pos Type.Path Path
-         -- ^ Full path.
+         | UpperTyp Pos Path
            deriving (Eq, Show)
 
 -- | Position filename line col.
@@ -69,7 +69,7 @@ funType (p:ps) t = Type.Arrow (patType p) (funType ps t)
 
 -- | This can only be used for patterns required to be fully typed.
 patType :: Pat -> Type.Type
-patType (AscribePat _ p ty) = typeType ty -- not sure about this
+patType (AscribePat _ _ p ty) = typeType ty -- not sure about this
 patType (LowerPat _ s)    = error "Compiler.Syntax.patType"
 patType (TuplePat _ _ ps) = Type.Tuple (map patType ps)
 patType UnderbarPat       = error "Compiler.Syntax.patType"
@@ -81,8 +81,8 @@ typeType (ArrowTyp ty1 ty2)  = Type.Arrow (typeType ty1) (typeType ty2)
 typeType (LowerTyp s)        = Type.Variable s
 typeType (TupleTyp tys)      = Type.Tuple (map typeType tys)
 typeType (UnitTyp _)         = Type.Unit
-typeType (UpperTyp _ _ [("String", [])]) = Type.String -- fix this
-typeType (UpperTyp _ _ q) = Type.Variant (createPath q)
+typeType (UpperTyp _ [("String", [])]) = Type.String -- fix this
+typeType (UpperTyp _ q) = Type.Variant (createPath q)
 
 createPath :: Path -> Type.Path
 createPath q = Type.Path (map f q)
