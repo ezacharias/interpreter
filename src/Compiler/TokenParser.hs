@@ -529,7 +529,7 @@ subDec = do
   x2 <- optional0 typParameters
   isToken RightCapArrowToken
   x3 <- path
-  return $ Syntax.SubDec pos x1 x2 x3
+  return $ Syntax.SubDec pos (Type.Path []) x1 x2 x3
 
 newDec :: AmbiguousParser Syntax.Dec
 newDec = do

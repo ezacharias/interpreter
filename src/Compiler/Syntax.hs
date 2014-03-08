@@ -13,7 +13,8 @@ data Dec = FunDec Pos [Type.Type] Type.Type String [String] [Pat] Type Term
          | ModDec Pos String [String] [Dec]
          | NewDec Pos Type.Path String [String] Path
          -- ^ Global path
-         | SubDec Pos String [String] Path
+         | SubDec Pos Type.Path String [String] Path
+         -- ^ Global path
          | SumDec Pos String [String] [(Pos, String, [Type])]
          | UnitDec Pos String [String] [Dec]
            deriving (Eq, Show)
@@ -62,28 +63,3 @@ data Type = ArrowType Type Type
 
 data Pos = Pos String Int Int
            deriving (Eq, Show)
-
-funType :: [Pat] -> Type -> Type.Type
-funType []     t = typeType t
-funType (p:ps) t = Type.Arrow (patType p) (funType ps t)
-
--- | This can only be used for patterns required to be fully typed.
-patType :: Pat -> Type.Type
-patType (AscribePat _ _ p ty) = typeType ty -- not sure about this
-patType (LowerPat _ s)    = error "Compiler.Syntax.patType"
-patType (TuplePat _ _ ps) = Type.Tuple (map patType ps)
-patType UnderbarPat       = error "Compiler.Syntax.patType"
-patType (UnitPat _)       = Type.Unit
-patType (UpperPat _ _ _ _ _ _) = error "Syntax.patType: not yet supported"
-
-typeType :: Type -> Type.Type
-typeType (ArrowType ty1 ty2)  = Type.Arrow (typeType ty1) (typeType ty2)
-typeType (LowerType s)        = Type.Variable s
-typeType (TupleType tys)      = Type.Tuple (map typeType tys)
-typeType (UnitType _)         = Type.Unit
-typeType (UpperType _ [("String", [])]) = Type.String -- fix this
-typeType (UpperType _ q) = Type.Variant (createPath q)
-
-createPath :: Path -> Type.Path
-createPath q = Type.Path (map f q)
-  where f (s, tys) = Type.Name s (map typeType tys)

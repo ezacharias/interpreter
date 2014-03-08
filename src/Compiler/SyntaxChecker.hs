@@ -53,7 +53,7 @@ checkDec r (NewDec _ _ s q ts) = todo
 -- We simply need to check that the qualified name is bound. We may have already
 -- done this when gathering the environment.
 
-checkDec r (SubDec _ _ s q) = todo
+checkDec r (SubDec _ _ _ s q) = todo
 
 checkDec r (SumDec _ s ts ds) = todo
 

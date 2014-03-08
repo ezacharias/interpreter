@@ -13,16 +13,13 @@ tr x = trace (show x) x
 addMetavariables :: Syntax.Program -> Syntax.Program
 addMetavariables p = convertProgram (programEnv p) p
 
-{-
--- An environment is the full path and the declarations. The list represents
--- the stack of nested nested lexical scope.
-type Env = [(Type.Path, [(String, Type.Type)], [Syntax.Dec])]
--}
-
 -- An environment is a possible old path, the full path, the local type bindings, and the declarations.
+-- The old path is the name of the environment without accounting for new, so it is only different for
+-- units. We use the old path to identify units which are primitives.
 data Env = Env [Frame]
            deriving (Show)
 type Frame = (Maybe Type.Path, Type.Path, [(String, Type.Type)], [Syntax.Dec])
+--- Actualyl, I think the old path is only used by primitives.
 
 programEnv :: Syntax.Program -> Env
 programEnv (Syntax.Program ds) = Env [(Nothing, Type.Path [], [], ds)]
@@ -35,7 +32,10 @@ envPush :: Env -> Frame -> Env
 envPush (Env r) x = Env (x:r)
 
 envAddTypeVariables :: Env -> [String] -> Env
-envAddTypeVariables r ss = envPush r (Nothing, Type.Path [], map (\ s -> (s, Type.Variable s)) ss, [])
+envAddTypeVariables r vs = envPush r (Nothing, Type.Path [], typeVariables vs, [])
+
+typeVariables :: [String] -> [(String, Type.Type)]
+typeVariables vs = map (\ v -> (v, Type.Variable v)) vs
 
 convertProgram ::  Env -> Syntax.Program -> Syntax.Program
 convertProgram r (Syntax.Program ds) = Syntax.Program (map (convertDec r) ds)
@@ -43,25 +43,31 @@ convertProgram r (Syntax.Program ds) = Syntax.Program (map (convertDec r) ds)
 convertDec :: Env -> Syntax.Dec -> Syntax.Dec
 convertDec r t =
   case t of
-    Syntax.FunDec pos _ _ s ss ps ty t -> run (envAddTypeVariables r ss) $ do
+    Syntax.FunDec pos _ _ s vs ps ty t -> run (envAddTypeVariables r vs) $ do
       tys' <- mapM getPatType ps
       ty' <- convertType ty
       t' <- convertTerm t
-      return $ Syntax.FunDec pos tys' ty' s ss ps ty t'
-    Syntax.ModDec pos s ds ->
-      let r' = (envPush r (Nothing, Type.pathAddName (envPath r) (Type.Name s []), [], ds))
-       in Syntax.ModDec pos s (map (convertDec r') ds)
-    Syntax.NewDec pos _ s q tys ->
-      Syntax.NewDec pos (map (envConvertType r) tys) s q tys
-    Syntax.SubDec pos s q ->
-      Syntax.SubDec pos s q
+      return $ Syntax.FunDec pos tys' ty' s vs ps ty t'
+    Syntax.ModDec pos s vs ds ->
+      let q' = Type.pathAddName (envPath r) (Type.Name s (map Type.Variable vs))
+          r' = (envPush r (Nothing, q', typeVariables vs, ds))
+       in Syntax.ModDec pos s vs (map (convertDec r') ds)
+    Syntax.NewDec pos _ s vs q ->
+      let r' = envAddTypeVariables r vs
+          q' = Type.pathAddName (envPath r) (Type.Name s (map Type.Variable vs))
+          q'' = envPath (envGetUnit r' (envConvertPath r' q) q')
+       in Syntax.NewDec pos q'' s vs q
+    Syntax.SubDec pos _ s vs q ->
+      let r' = envAddTypeVariables r vs
+          q' = envPath (envGetMod r' (envConvertPath r' q))
+       in Syntax.SubDec pos q' s vs q
     -- Do we want to add some information here?
     Syntax.SumDec pos s ss cs ->
       Syntax.SumDec pos s ss cs
-    Syntax.UnitDec pos s ss ds ->
-      let n' = (Type.Name s (map Type.Variable ss))
-          r' = envPush r (Nothing, Type.pathAddName (envPath r) n', map (\ s -> (s, Type.Variable s)) ss, ds)
-       in Syntax.UnitDec pos s ss (map (convertDec r') ds)
+    Syntax.UnitDec pos s vs ds ->
+      let q' = Type.pathAddName (envPath r) (Type.Name s (map Type.Variable vs))
+          r' = envPush r (Nothing, q', typeVariables vs, ds)
+       in Syntax.UnitDec pos s vs (map (convertDec r') ds)
 
 convertTerm :: Syntax.Term -> M Syntax.Term
 convertTerm t =
@@ -82,17 +88,15 @@ convertTerm t =
       t <- convertTerm t
       rs <- mapM convertRule rs
       return $ Syntax.CaseTerm ty t rs
-    Syntax.ForTerm _ _ p t1 t2 -> do
-      tys <- case p of
-        Nothing -> return [Type.Unit]
-        Just ps -> mapM (const gen) ps
+    Syntax.ForTerm _ _ ps t1 t2 -> do
+      tys <- case ps of
+        [] -> return [Type.Unit]
+        (_:_) -> mapM (const gen) ps
       ty <- gen
-      p <- case p of
-        Nothing -> return Nothing
-        Just ps -> mapM convertPat ps >>= (return . Just)
+      ps <- mapM convertPat ps
       t1 <- convertTerm t1
       t2 <- convertTerm t2
-      return $ Syntax.ForTerm tys ty p t1 t2
+      return $ Syntax.ForTerm tys ty ps t1 t2
     Syntax.SeqTerm t1 t2 -> do
       t1 <- convertTerm t1
       t2 <- convertTerm t2
@@ -105,20 +109,26 @@ convertTerm t =
       return $ Syntax.TupleTerm pos tys ts
     Syntax.UnitTerm pos ->
       return $ Syntax.UnitTerm pos
-    Syntax.UpperTerm pos _ _ q ts -> do
-      -- getFun will ignore the type arguments to the function name so we just use any empty list.
-      (ss, ty) <- getFun (createPath q [])
-      -- If there are no type arguments, generate metavariables.
-      ts' <- case ts of
-        [] -> mapM (const gen) ss
-        ts -> mapM convertType ts
-      -- Apply type arguments to the function type.
-      let ty' = Type.substitute (zip ss ts') ty
-      return $ Syntax.UpperTerm pos ts' ty' q ts
+    Syntax.UpperTerm pos _ _ q -> do
+      q' <- convertPath q
+      (q', ty) <- getFun q'
+      return $ Syntax.UpperTerm pos q' ty q
     Syntax.VariableTerm pos s ->
       return $ Syntax.VariableTerm pos s
     t ->
       todo $ "convertTerm: " ++ show t
+
+-- Converts to a local Type.Path.
+convertPath :: Syntax.Path -> M Type.Path
+convertPath q = do
+  r <- getEnv
+  envConvertPath r q
+
+envConvertPath :: Env -> Syntax.Path -> Type.Path
+envConvertPath r q = Type.Path $ map (envConvertName r) q
+
+envConvertName :: Env -> Syntax.Name -> Type.Name
+envConvertName r (s, tys) = Type.Name s (map (envConvertType r) tys)
 
 convertRule :: Syntax.Rule -> M Syntax.Rule
 convertRule (pat, t) = do
@@ -182,7 +192,7 @@ envGetConstructorWithName (Env r@((Nothing, q, _, ds) : r')) (Type.Name s1 tys) 
 envGetConstructorWithFields :: Env -> Type.Path -> ([String], Type.Type, [Type.Type])
 envGetConstructorWithFields r q = todo "envGetConstructorWithFields"
 
--- Returns the type paramaters and the full type of the function.
+-- Returns returns the full path of the function as well as the type.
 getFun :: Type.Path -> M ([String], Type.Type)
 getFun q = do
   r <- getEnv
@@ -282,7 +292,7 @@ throwPrimitive ty1 ty2 =
   , Type.Arrow ty1 ty2
   )
 
-envSigType :: Env -> [Syntax.Pat] -> Syntax.Typ -> Type.Type
+envSigType :: Env -> [Syntax.Pat] -> Syntax.Type -> Type.Type
 envSigType r [] ty = envConvertType r ty
 envSigType r (p:ps) ty = Type.Arrow (envPatType r p) (envSigType r ps ty)
 
@@ -291,15 +301,15 @@ convertType ty = do
   r <- getEnv
   return $ envConvertType r ty
 
-envConvertType :: Env -> Syntax.Typ -> Type.Type
+envConvertType :: Env -> Syntax.Type -> Type.Type
 envConvertType r ty =
   case ty of
-    Syntax.ArrowTyp ty1 ty2 -> Type.Arrow (envConvertType r ty1) (envConvertType r ty2)
-    Syntax.LowerTyp x -> envGetTypeVariable r x
-    Syntax.TupleTyp tys -> Type.Tuple (map (envConvertType r) tys)
-    Syntax.UnitTyp _ -> Type.Unit
-    Syntax.UpperTyp _ ["Result"] tys -> envGetType r (createPath ["Result"] (map (envConvertType r) tys))
-    Syntax.UpperTyp _ q tys -> envGetType r (createPath q (map (envConvertType r) tys))
+    Syntax.ArrowType ty1 ty2 -> Type.Arrow (envConvertType r ty1) (envConvertType r ty2)
+    Syntax.LowerType x -> envGetTypeVariable r x
+    Syntax.TupleType tys -> Type.Tuple (map (envConvertType r) tys)
+    Syntax.UnitType _ -> Type.Unit
+    Syntax.UpperType _ [("Result", [])] -> envGetType r (createPath ["Result"] (map (envConvertType r) tys))
+    Syntax.UpperType _ q -> envGetType r (createPath q (map (envConvertType r) tys))
 
 envGetTypeVariable :: Env -> String -> Type.Type
 envGetTypeVariable (Env []) s = unreachable $ "envGetTypeVariable: " ++ s
@@ -500,6 +510,43 @@ search f = choice . map f
 choice :: Alternative m => [m a] -> m a
 choice []     = empty
 choice (x:xs) = x <|> choice xs
+
+
+
+
+
+
+
+funType :: [Syntax.Pat] -> Syntax.Type -> Type.Type
+funType []     t = typeType t
+funType (p:ps) t = Type.Arrow (patType p) (funType ps t)
+
+-- | This can only be used for patterns required to be fully typed.
+patType :: Syntax.Pat -> Type.Type
+patType (Syntax.AscribePat _ _ p ty) = typeType ty -- not sure about this
+patType (Syntax.LowerPat _ s)    = error "Compiler.Syntax.patType"
+patType (Syntax.TuplePat _ _ ps) = Type.Tuple (map patType ps)
+patType Syntax.UnderbarPat       = error "Compiler.Syntax.patType"
+patType (Syntax.UnitPat _)       = Type.Unit
+patType (Syntax.UpperPat _ _ _ _ _ _) = error "Syntax.patType: not yet supported"
+
+typeType :: Syntax.Type -> Type.Type
+typeType (Syntax.ArrowType ty1 ty2)  = Type.Arrow (typeType ty1) (typeType ty2)
+typeType (Syntax.LowerType s)        = Type.Variable s
+typeType (Syntax.TupleType tys)      = Type.Tuple (map typeType tys)
+typeType (Syntax.UnitType _)         = Type.Unit
+typeType (Syntax.UpperType _ [("String", [])]) = Type.String -- fix this
+typeType (Syntax.UpperType _ q) = Type.Variant (createPath q)
+
+createPath :: Syntax.Path -> Type.Path
+createPath q = Type.Path (map f q)
+  where f (s, tys) = Type.Name s (map typeType tys)
+
+
+
+
+
+
 
 todo :: String -> a
 todo s = error $ "todo: Meta." ++ s
