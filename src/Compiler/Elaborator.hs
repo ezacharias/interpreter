@@ -1,3 +1,5 @@
+--  LANGUAGE RecordWildCards #-}
+
 module Compiler.Elaborator where
 
 import           Control.Monad   (MonadPlus, mzero)
@@ -18,21 +20,226 @@ elaborate :: Syntax.Program -> Simple.Program
 elaborate p = run p $ do
   d <- getFun (Type.Path [(Type.Name "Main" [])])
   finish
-  x1 <- getProgramTags
-  x2 <- getProgramSums
-  x3 <- getProgramFuns
+  x1 <- get programTags
+  x2 <- get programSums
+  x3 <- get programFuns
   return $ Simple.Program x1 x2 x3 d
 
 finish :: M ()
 finish = do
-  work <- getWork
-  case work of
+  w <- get work
+  case w of
     [] ->
       return ()
-    (m : work) -> do
-      setWork work
+    (m : w) -> do
+      set (\ s -> s {work = w})
       m
       finish
+
+-- This uses a fully qualified name. First we check to see if the function has
+-- already been exported. If not, we export it.
+getFun :: Type.Path -> M Simple.Ident
+getFun q = do
+  x <- get exportedFuns
+  case Map.lookup q x of
+    Nothing -> do
+      d <- gen
+      set (\ s -> s {exportedFuns = Map.insert q d x})
+      addWork (elaborateFun q d)
+      return d
+    Just d -> return d
+
+elaborateFun :: Type.Path -> Simple.Ident -> M ()
+elaborateFun (Type.Path ns) d = do
+  Syntax.Program ds <- look program
+  elaborateFunWithFields ns d ds
+
+elaborateFunWithFields :: [Type.Name] -> Simple.Ident -> [Syntax.Dec] -> M ()
+elaborateFunWithFields ns d decs =
+  case ns of
+    [Type.Name "Exit" []] -> primitiveExit d
+    [] -> unreachable "elaborateFunWithFields"
+    [n] -> fromMaybe (unreachable $ "elaborateFunWithFields: " ++ show n) (search (hasFunWithField n d) decs)
+    (n:ns) -> todo "elaborateFunWithFields2"
+
+primitiveExit :: Int -> M ()
+primitiveExit d =
+  addFun d $ Simple.Fun (Simple.SumType 0) (Simple.ConstructorTerm 0 0 [])
+
+hasFunWithField :: Type.Name -> Simple.Ident -> Syntax.Dec -> Maybe (M ())
+hasFunWithField (Type.Name s1 tys) d dec =
+  case dec of
+    Syntax.FunDec _ tys ty s2 vs pats _ t | s1 == s2 -> Just $ do
+      withTypeVariables (zip vs (todo "hasFunWithField")) $ do
+        tys <- mapM elaborateType tys
+        ty <- elaborateType ty
+        t <- elaborateLambda pats tys t
+        addFun d (Simple.Fun (foldr Simple.ArrowType ty tys) t)
+    Syntax.SumDec _ _ _ _ -> Nothing -- todo
+    _ -> Nothing
+
+elaborateType :: Type.Type -> M Simple.Type
+elaborateType ty =
+  case ty of
+    Type.Arrow ty1 ty2 -> do
+      ty1 <- elaborateType ty1
+      ty2 <- elaborateType ty2
+      return $ Simple.ArrowType ty1 ty2
+    Type.Metavariable _ ->
+      unreachable $ "elaborateType: " ++ show ty
+    Type.String ->
+      return $ Simple.StringType
+    Type.Tuple tys -> do
+      tys <- mapM elaborateType tys
+      return $ Simple.TupleType tys
+    Type.Unit ->
+       return $ Simple.UnitType
+    Type.Variable x ->
+      unreachable $ "elaborateType: " ++ show ty
+    Type.Variant q -> do
+      d <- getSum q
+      return $ Simple.SumType d
+
+getSum :: Type.Path -> M Simple.Ident
+getSum q = do
+  x <- get exportedSums
+  case Map.lookup q x of
+    Nothing -> do
+      d <- gen
+      set (\ s -> s {exportedSums = Map.insert q d x})
+      addWork $ elaborateSum q d
+      return d
+    Just d -> return d
+
+elaborateSum :: Type.Path -> Simple.Ident -> M ()
+elaborateSum (Type.Path ns) d = do
+  Syntax.Program ds <- look program
+  elaborateSumWithFields ns d ds
+
+elaborateSumWithFields :: [Type.Name] -> Simple.Ident -> [Syntax.Dec] -> M ()
+elaborateSumWithFields ns d decs =
+  case ns of
+    [] -> unreachable "elaborateSumWithFields"
+    [n] -> todo "elaborateSumWithFields1" -- fromMaybe (unreachable $ "elaborateFunWithFields: " ++ show n) (search (hasFunWithField n d) decs)
+    (n:ns) -> todo "elaborateSumWithFields2"
+
+elaborateLambda :: [Syntax.Pat] -> [Simple.Type] -> Syntax.Term -> M Simple.Term
+elaborateLambda []     []       t = elaborateTerm t
+elaborateLambda (p:ps) (ty:tys) t = do
+  d <- gen
+  withPat d p $ do
+    t <- elaborateLambda ps tys t
+    return $ Simple.LambdaTerm d ty t
+elaborateLambda _ _ _ = unreachable "elaborateLambda"
+
+withPat :: Simple.Ident -> Syntax.Pat -> M a -> M a
+withPat = todo "withPat"
+
+inModuleWithField :: Type.Name -> Syntax.Dec -> ([Syntax.Dec] -> Maybe (M ())) -> Maybe (M ())
+inModuleWithField (Type.Name s1 tys) dec k =
+  case dec of
+    Syntax.ModDec _ s2 vs decs | s1 == s2 -> k decs
+    Syntax.NewDec _ q2 s2 vs _ | s1 == s2 -> Just $ withRename (createRename q2 q1) (inUnit q2 k)
+    _ -> Nothing
+  where q1 = todo "inModuleWithField"
+
+inUnit :: Type.Path -> ([Syntax.Dec] -> Maybe (M ())) -> M a
+inUnit = todo "inUnit"
+
+createRename :: Type.Path -> Type.Path -> (Type.Path -> Type.Path)
+createRename q2 q1 q3 = fromMaybe q3 (createRename2 q2 q1 q3)
+
+createRename2 :: Type.Path -> Type.Path -> Type.Path -> Maybe Type.Path
+createRename2 q2 q1 q3 = todo "createRename2"
+
+elaborateTerm :: Syntax.Term -> M Simple.Term
+elaborateTerm t =
+  case t of
+    -- Syntax.UpperTerm _ tys _ ss _ -> do
+    Syntax.UpperTerm _ q _ _ -> do
+      -- tys <- mapM updateType tys
+      d <- getFun q -- todo remove type variables
+      return $ Simple.FunTerm d
+    _ -> todo $ "elaborateTerm: " ++ show t
+
+addWork :: M () -> M ()
+addWork m = do
+  w <- get work
+  set (\ s -> s {work = (m : w)})
+
+addFun :: Simple.Ident -> Simple.Fun -> M ()
+addFun d x = do
+  xs <- get programFuns
+  set (\ s -> s {programFuns = IdentMap.insert d x xs})
+
+newtype M a = M { runM :: Look -> (a -> State -> Simple.Program) -> State -> Simple.Program }
+
+data State = State
+ { work :: [M ()]
+ , ident :: Simple.Ident
+ , exportedTags :: Map Type.Path Int
+ , exportedSums :: Map Type.Path Int
+ , exportedFuns :: Map Type.Path Int
+ , programTags :: Simple.IdentMap Simple.Tag
+ , programSums :: Simple.IdentMap Simple.Sum
+ , programFuns :: Simple.IdentMap Simple.Fun
+ }
+
+data Look = Look
+ { program :: Syntax.Program
+ , typeVariables :: [(String, Simple.Type)]
+ , renamer :: Type.Path -> Type.Path
+ }
+
+instance Monad M where
+  return x = M (\ o k -> k x)
+  m >>= f = M (\ o k -> runM m o (\ x -> runM (f x) o k))
+
+run :: Syntax.Program -> M Simple.Program -> Simple.Program
+run p m = runM m look (\ x _ -> x) state
+  where look = Look { program = p
+                    , typeVariables = []
+                    , renamer = id
+                    }
+        state = State { work = []
+                      , ident = 100
+                      , exportedTags = Map.empty
+                      , exportedSums = Map.fromList [(Type.Path [Type.Name "Output" []], 0)]
+                      , exportedFuns = Map.empty
+                      , programTags = IdentMap.empty
+                      , programSums = IdentMap.empty
+                      , programFuns = IdentMap.empty
+                      }
+
+rename :: Type.Path -> M Type.Path
+rename q = do f <- look renamer
+              return $ f q
+
+get :: (State -> a) -> M a
+get f = M (\ o k d -> k (f d) d)
+
+set :: (State -> State) -> M ()
+set f = M (\ o k d -> k () (f d))
+
+look :: (Look -> a) -> M a
+look f = M (\ o k d -> k (f o) d)
+
+with :: (Look -> Look) -> M a -> M a
+with f m = M (\ o k d -> runM m (f o) k d)
+
+withRename :: (Type.Path -> Type.Path) -> M a -> M a
+withRename f m = with (\ o -> o {renamer = renamer o . f}) m
+
+withTypeVariables :: [(String, Simple.Type)] -> M a -> M a
+withTypeVariables xs m = with (\ o -> o {typeVariables = xs ++ typeVariables o}) m
+
+gen :: M Simple.Ident
+gen = do
+  d <- get ident
+  set (\ s -> s {ident = d + 1})
+  return d
+
+{-
 
 getFun :: Type.Path -> M Simple.Ident
 getFun q = do
@@ -759,17 +966,6 @@ getProgramFuns = M f
   where f r localBinds k genVal work exportedTags exportedSums exportedFuns programTags programSums programFuns =
          k programFuns genVal work exportedTags exportedSums exportedFuns programTags programSums programFuns
 
--- Utility Functions
-
-search :: (a -> Maybe b) -> [a] -> Maybe b
-search f [] = Nothing
-search f (x:xs) = maybe (search f xs) Just (f x)
-
-todo :: String -> a
-todo s = error $ "todo: Elaborator." ++ s
-
-unreachable :: String -> a
-unreachable s = error $ "unreachable: Elaborator." ++ s
 
 
 type M2 a = [a]
@@ -1279,18 +1475,23 @@ envPath = tail . map fst
 
 envPop :: Env -> Env
 envPop = tail
--}
-
-{-
-unreachable :: String -> a
-unreachable = error . ("unreachable: " ++)
 
 dropLast :: [a] -> [a]
 dropLast [] = unreachable "dropLast"
 dropLast [x] = []
 dropLast (x:xs) = x : dropLast xs
+-}
+
+-}
+
+-- Utility Functions
 
 search :: (a -> Maybe b) -> [a] -> Maybe b
 search f [] = Nothing
 search f (x:xs) = maybe (search f xs) Just (f x)
--}
+
+todo :: String -> a
+todo s = error $ "todo: Elaborator." ++ s
+
+unreachable :: String -> a
+unreachable s = error $ "unreachable: Elaborator." ++ s

@@ -1,6 +1,7 @@
 module Compiler.Meta where
 
 import Control.Applicative (Alternative, empty, (<|>))
+import Control.Monad (liftM)
 import Data.Maybe (fromMaybe)
 import Debug.Trace (trace)
 
@@ -11,7 +12,7 @@ tr :: Show a => a -> a
 tr x = trace (show x) x
 
 addMetavariables :: Syntax.Program -> Syntax.Program
-addMetavariables p = convertProgram (programEnv p) p
+addMetavariables p = run (programEnv p) $ updateProgram p
 
 -- An environment is a possible old path, the full path, the local type bindings, and the declarations.
 -- The old path is the name of the environment without accounting for new, so it is only different for
@@ -24,39 +25,259 @@ type Frame = (Maybe Type.Path, Type.Path, [(String, Type.Type)], [Syntax.Dec])
 programEnv :: Syntax.Program -> Env
 programEnv (Syntax.Program ds) = Env [(Nothing, Type.Path [], [], ds)]
 
-envPath :: Env -> Type.Path
-envPath (Env []) = unreachable "envPath"
-envPath (Env ((_, q, _, _) : _)) = q
+updateProgram ::  Syntax.Program -> M Syntax.Program
+updateProgram (Syntax.Program ds) = do
+  ds <- mapM updateDec ds
+  return $ Syntax.Program ds
 
-envPush :: Env -> Frame -> Env
-envPush (Env r) x = Env (x:r)
+updateDec :: Syntax.Dec -> M Syntax.Dec
+updateDec dec =
+  case dec of
+    Syntax.FunDec pos _ _ s vs ps ty t ->
+      withEnvAddTypeParameters vs $ do
+        tys' <- mapM convertPat ps
+        ty' <- convertType ty
+        t <- updateTerm t
+        return $ Syntax.FunDec pos tys' ty' s vs ps ty t
+    Syntax.ModDec pos s vs ds -> do
+      todo "updateDec mod"
+    Syntax.NewDec pos _ s vs q -> do
+      todo "updateDec new"
+    Syntax.SubDec pos _ s vs q ->
+      todo "updateDec sub"
+    -- Do we want to add some information here?
+    Syntax.SumDec pos s ss cs ->
+      todo "updateDec sum"
+    Syntax.UnitDec pos s vs ds ->
+      todo "updateDec unit"
 
-envAddTypeVariables :: Env -> [String] -> Env
-envAddTypeVariables r vs = envPush r (Nothing, Type.Path [], typeVariables vs, [])
+updateTerm :: Syntax.Term -> M Syntax.Term
+updateTerm (Syntax.UpperTerm pos _ _ [("Exit", [])]) = return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Exit" []]) (Type.Variant (Type.Path [Type.Name "Output" []])) [("Exit", [])]
+updateTerm t = todo $ "updateTerm: " ++ show t
 
-typeVariables :: [String] -> [(String, Type.Type)]
-typeVariables vs = map (\ v -> (v, Type.Variable v)) vs
+-- The pattern must be fully typed to use this; i.e. function parameters.
+-- Theoretically, getting an upper pat could require unification, so we don't
+-- do it for now, although I think I could use the type checker module to do
+-- it.
+convertPat :: Syntax.Pat -> M Type.Type
+convertPat p =
+  case p of
+    Syntax.AscribePat _ _ p ty -> convertType ty
+    Syntax.LowerPat _ x -> unreachable "getPatType"
+    Syntax.TuplePat _ _ ps -> liftM Type.Tuple (mapM convertPat ps)
+    Syntax.UnderbarPat -> unreachable "getPatType"
+    Syntax.UnitPat _ -> return $ Type.Unit
+    Syntax.UpperPat _ _ _ _ q ps -> unreachable "getPatType"
 
-convertProgram ::  Env -> Syntax.Program -> Syntax.Program
-convertProgram r (Syntax.Program ds) = Syntax.Program (map (convertDec r) ds)
+convertType :: Syntax.Type -> M Type.Type
+convertType ty = do
+  case ty of
+    Syntax.ArrowType ty1 ty2 -> do
+      ty1 <- convertType ty1
+      ty2 <- convertType ty2
+      return $ Type.Arrow ty1 ty2
+    Syntax.LowerType x ->
+      lookupTypeVariable x
+    Syntax.TupleType tys -> do
+      tys <- mapM convertType tys
+      return $ Type.Tuple tys
+    Syntax.UnitType _ ->
+      return $ Type.Unit
+    Syntax.UpperType _ q -> do
+      q <- convertPath q
+      getSum q
 
-convertDec :: Env -> Syntax.Dec -> Syntax.Dec
-convertDec r t =
-  case t of
-    Syntax.FunDec pos _ _ s vs ps ty t -> run (envAddTypeVariables r vs) $ do
-      tys' <- mapM getPatType ps
-      ty' <- convertType ty
-      t' <- convertTerm t
-      return $ Syntax.FunDec pos tys' ty' s vs ps ty t'
-    Syntax.ModDec pos s vs ds ->
-      let q' = Type.pathAddName (envPath r) (Type.Name s (map Type.Variable vs))
-          r' = (envPush r (Nothing, q', typeVariables vs, ds))
-       in Syntax.ModDec pos s vs (map (convertDec r') ds)
-    Syntax.NewDec pos _ s vs q ->
-      let r' = envAddTypeVariables r vs
-          q' = Type.pathAddName (envPath r) (Type.Name s (map Type.Variable vs))
-          q'' = envPath (envGetUnit r' (envConvertPath r' q) q')
-       in Syntax.NewDec pos q'' s vs q
+-- Converts to a local Type.Path.
+convertPath :: Syntax.Path -> M Type.Path
+convertPath q = do
+  ns <- mapM convertName q
+  return $ Type.Path ns
+
+convertName :: Syntax.Name -> M Type.Name
+convertName (s, tys) = do
+  tys <- mapM convertType tys
+  return $ Type.Name s tys
+
+getSum :: Type.Path -> M Type.Type
+getSum (Type.Path ns) =
+  case ns of
+    [] -> unreachable "getSum"
+    [n] -> getSumWithName n
+    (n:ns) -> inModWithName n $
+                inModResolveFields ns $ \ n' ->
+                  getSumWithField n'
+
+getSumWithName :: Type.Name -> M Type.Type
+getSumWithName (Type.Name "Output" []) = return $ Type.Variant (Type.Path [Type.Name "Output" []])
+getSumWithName n = todo $ "getSumWithName: " ++ show n
+
+getSumWithField :: Type.Name -> M Type.Type
+getSumWithField = todo "getSumWithField"
+{-
+  Syntax.UpperType _ [("Result", [])] ->envGetType r (createPath ["Result"] (map (envConvertType r) tys))
+  Syntax.UpperType _ q -> envGetType r (createPath q (map (envConvertType r) tys))
+-}
+
+inMod :: Type.Path -> M a -> M a
+inMod (Type.Path ns) m =
+  case ns of
+    [] -> unreachable "inMod"
+    [n] -> inModWithName n m
+    (n:ns) -> inModWithName n $
+                inModResolveFields ns $ \n' ->
+                  inModWithField n' m
+
+inModWithName :: Type.Name -> M a -> M a
+inModWithName n m = do
+  Env xs <- getEnv
+  inModWithNameFrames n m xs
+
+inModWithNameFrames :: Type.Name -> M a -> [Frame] -> M a
+inModWithNameFrames n m xs =
+  case xs of
+    [] -> todo "inModWithNameFrames"
+    ((Just q, _, _, ds):xs') -> todo "inModWithNameFrames"
+    ((Nothing, _, _, ds):xs') ->
+      case search (inModWithNameDec n m) ds of
+        Just m -> withEnv (Env xs) m
+        Nothing -> inModWithNameFrames n m xs'
+
+inModWithNameDec :: Type.Name -> M a -> Syntax.Dec -> Maybe (M a)
+inModWithNameDec (Type.Name s1 tys) m dec =
+  case dec of
+    Syntax.ModDec _ s2 vs ds | s1 == s2 ->
+      Just $ do
+        q <- getEnvPath
+        tys' <- case tys of
+          [] -> return tys
+          _ -> mapM (const gen) vs
+        withEnvAddFrame (Nothing, Type.pathAddName q (Type.Name s1 tys'), zip vs tys', ds)
+          m
+    Syntax.SubDec _ _ s2 vs q | s1 == s2 ->
+      Just $ do
+        tys' <- case tys of
+          [] -> return tys
+          _ -> mapM (const gen) vs
+        q <- withEnvAddTypeVariables (zip vs tys') $
+                convertPath q
+        Env r <- getEnv
+        -- Substitutions start searching the environment above the declaration.
+        case r of
+          [] ->
+            unreachable "decHasModWithName"
+          (_:r) -> do
+            withEnv (Env r) $
+              inMod q m
+    Syntax.NewDec _ _ s2 vs q | s1 == s2 ->
+      Just $ do
+        tys' <- case tys of
+          [] -> return tys
+          _ -> mapM (const gen) vs
+        q <- withEnvAddTypeVariables (zip vs tys') $
+                convertPath q
+        q2 <- getEnvPath
+        inUnit q (Type.pathAddName q2 (Type.Name s2 tys')) m
+    _ ->
+      unreachable "inModWithNameDec"
+
+-- The last name is for the specific declaration, so we pass it to a function.
+-- Everything before the last name is the name of a module.
+inModResolveFields :: [Type.Name] -> (Type.Name -> M a) -> M a
+inModResolveFields ns f =
+  case ns of
+    [] -> unreachable "withResolveFields"
+    [n] -> f n
+    (n:ns) -> inModWithField n (inModResolveFields ns f)
+
+-- I think this always works for now, but changes to the module system will
+-- probably break it.
+inModWithField :: Type.Name -> M a -> M a
+inModWithField n m = inModWithName n m
+
+-- The second path is the full path of the new declaration.
+inUnit :: Type.Path -> Type.Path -> M a -> M a
+inUnit q q2 m =
+  todo "inUnit"
+
+lookupTypeVariable :: String -> M Type.Type
+lookupTypeVariable s = do
+  Env r <- getEnv
+  return $ fromMaybe (unreachable "lookupTypeVariable") (search has r)
+  where has (_, _, xs, _) = lookup s xs
+
+getEnvPath :: M Type.Path
+getEnvPath = do
+  Env r <- getEnv
+  case r of
+    [] -> unreachable "getEnvPath"
+    ((_, q, _, _) : _) -> return q
+
+withEnvAddFrame :: Frame -> M a -> M a
+withEnvAddFrame x m = do
+  Env r <- getEnv
+  withEnv (Env (x : r)) m
+
+withEnvAddTypeParameters :: [String] -> M a -> M a
+withEnvAddTypeParameters vs m = do
+  withEnvAddTypeVariables (typeParameters vs) m
+
+withEnvAddTypeVariables :: [(String, Type.Type)] -> M a -> M a
+withEnvAddTypeVariables xs m = do
+  q <- getEnvPath
+  withEnvAddFrame (Nothing, q, xs, []) m
+
+typeParameters :: [String] -> [(String, Type.Type)]
+typeParameters vs = map (\ v -> (v, Type.Variable v)) vs
+
+run :: Env -> M Syntax.Program -> Syntax.Program
+run r m =  runM m r k 0
+  where k x _ = x
+
+newtype M a = M { runM :: Env -> (a -> Int -> Syntax.Program) -> Int -> Syntax.Program }
+
+instance Monad M where
+  return x = M (\ r k -> k x)
+  m >>= f = M (\ r k -> runM m r (\ x -> runM (f x) r k))
+
+getEnv :: M Env
+getEnv = M f
+  where f r k = k r
+
+withEnv :: Env -> M a -> M a
+withEnv r' m = M f
+  where f r k = runM m r' k
+
+gen :: M Type.Type
+gen = M f
+  where f r k i = k (Type.Metavariable i) (i + 1)
+
+
+{-
+
+
+convertDec :: Syntax.Dec -> M Syntax.Dec
+convertDec dec =
+  case dec of
+    Syntax.FunDec pos _ _ s vs ps ty t ->
+      withEnvAddTypeVariables vs $ do
+        tys' <- mapM getPatType ps
+        ty' <- convertType ty
+        t' <- convertTerm t
+        return $ Syntax.FunDec pos tys' ty' s vs ps ty t'
+    Syntax.ModDec pos s vs ds -> do
+      q2 <- envPath
+      let q' = return$ Type.pathAddName q2 (Type.Name s (map Type.Variable vs))
+      withEnvAddFrame (Nothing, q', typeVariables vs, ds) $ do
+        ds < mapM convertDec ds
+        return $ Syntax.ModDec pos s vs ds
+    Syntax.NewDec pos _ s vs q -> do
+      q2 <- envPath
+      let q' = Type.pathAddName q2 (Type.Name s (map Type.Variable vs))
+      withEnvAddTypeVariables vs $ do
+        q3 <- convertPath q
+        withUnit q3 $ do
+          q'' <- envPath
+          return $ Syntax.NewDec pos q'' s vs q
     Syntax.SubDec pos _ s vs q ->
       let r' = envAddTypeVariables r vs
           q' = envPath (envGetMod r' (envConvertPath r' q))
@@ -117,18 +338,6 @@ convertTerm t =
       return $ Syntax.VariableTerm pos s
     t ->
       todo $ "convertTerm: " ++ show t
-
--- Converts to a local Type.Path.
-convertPath :: Syntax.Path -> M Type.Path
-convertPath q = do
-  r <- getEnv
-  envConvertPath r q
-
-envConvertPath :: Env -> Syntax.Path -> Type.Path
-envConvertPath r q = Type.Path $ map (envConvertName r) q
-
-envConvertName :: Env -> Syntax.Name -> Type.Name
-envConvertName r (s, tys) = Type.Name s (map (envConvertType r) tys)
 
 convertRule :: Syntax.Rule -> M Syntax.Rule
 convertRule (pat, t) = do
@@ -193,73 +402,73 @@ envGetConstructorWithFields :: Env -> Type.Path -> ([String], Type.Type, [Type.T
 envGetConstructorWithFields r q = todo "envGetConstructorWithFields"
 
 -- Returns returns the full path of the function as well as the type.
-getFun :: Type.Path -> M ([String], Type.Type)
-getFun q = do
-  r <- getEnv
-  return $ envGetFun r q
-
-envGetFun :: Env -> Type.Path -> ([String], Type.Type)
-envGetFun r (Type.Path [n])    = envGetFunWithName r n
-envGetFun r (Type.Path (n:ns)) = envGetFunWithFields (envGetModWithName r n) (Type.Path ns)
-envGetFun r (Type.Path [])     = unreachable "envGetFun"
+getFun :: Type.Path -> M (Type.Path, Type.Type)
+getFun (Type.Path [n])    = getFunWithName r n
+getFun (Type.Path (n:ns)) = withGetModWithName n $
+                              withResolveFields ns $ \ n' ->
+                                getFunWithField n'
+getFun (Type.Path [])     = unreachable "envGetFun"
 
 -- Should this check the static path?
-envGetFunWithName :: Env -> Type.Name -> ([String], Type.Type)
-envGetFunWithName (Env []) (Type.Name "Continue" _) = continuePrimitive
-envGetFunWithName (Env []) (Type.Name "Exit" _) = exitPrimitive
-envGetFunWithName (Env []) (Type.Name "Write" _) = writePrimitive
-envGetFunWithName (Env []) (Type.Name "Unreachable" _) = (["a"], Type.Variable "a")
-envGetFunWithName (Env []) q = unreachable $ "envGetFunWithName: " ++ show q
-envGetFunWithName (Env r@((Just q1, _, _, _):r')) q2 = unreachable $ "envGetFunWithName: " ++ show q1
-envGetFunWithName (Env r@((Nothing, q, _, ds) : r')) (Type.Name s1 tys) = check $ search has ds
-  where check Nothing = envGetFunWithName (Env r') (Type.Name s1 tys)
-        check (Just x) = x
-        has dec =
-          case dec of
-            Syntax.FunDec _ ty0s ty0 s2 ss ps ty t | s1 == s2 ->
-              let r'' = Env ((Nothing, Type.Path [], map (\ s -> (s, Type.Variable s)) ss, []) : r)
-               in Just $ (ss, envSigType r'' ps ty)
-            Syntax.SumDec _ s2 ss cs ->
-              let hasConstructor (_, s3, tys) | s1 == s3 =
-                    let tys' = map (envConvertType (envAddTypeVariables (Env r) ss)) tys
-                        ty' = Type.Variant (Type.pathAddName q (Type.Name s2 (map Type.Variable ss)))
-                     in Just (ss, foldr Type.Arrow ty' tys')
-                  hasConstructor _ =
-                    Nothing
-               in search hasConstructor cs
-            _ ->
-              Nothing
+getFunWithName :: Type.Name -> M (Type.Path, Type.Type)
+getFunWithName n = do
+  Env r <- getEnv
+  case r of
+    [] -> case n of
+      Type.Name "Continue" _ -> continuePrimitive
+      Type.Name "Exit" _ -> exitPrimitive
+      Type.Name "Write" _ -> writePrimitive
+      _ -> unreachable $ "getFunWithName: " ++ show n
+    (Just q1, _, _, _) : r' ->
+      unreachable $ "getFunWithName: " ++ show q1
+    (Nothing, q, _, ds) : r' ->
+      case search (frameHasFunWithName n) ds of
+        Nothing -> withEnv r' (getFunWithName n)
+        Just m -> m
 
-envGetFunWithFields :: Env -> Type.Path -> ([String], Type.Type)
-envGetFunWithFields (Env []) (Type.Path [Type.Name "Continue" _]) = continuePrimitive
-envGetFunWithFields (Env []) (Type.Path [Type.Name "Exit" _]) = exitPrimitive
-envGetFunWithFields (Env []) (Type.Path [Type.Name "Write" _]) = writePrimitive
-envGetFunWithFields (Env []) n = unreachable $ "envGetFunWithFields1: " ++ show n
-envGetFunWithFields _ (Type.Path []) = unreachable "envGetFunWithFields 2"
-envGetFunWithFields (Env r@((Just (Type.Path [Type.Name "Escape" [ty1, ty2]]), _, _, _):r')) (Type.Path [Type.Name "Catch" []]) = catchPrimitive ty1 ty2
-envGetFunWithFields (Env r@((Just (Type.Path [Type.Name "Escape" [ty1, ty2]]), _, _, _):r')) (Type.Path [Type.Name "Throw" []]) = throwPrimitive ty1 ty2
-envGetFunWithFields (Env r@((_, q, _, ds):r')) (Type.Path [Type.Name s1 tys]) = check $ search has ds
-  where check Nothing = unreachable "envGetFunWithFields 6"
-        check (Just x) = x
-        has dec =
-          case dec of
-            Syntax.FunDec _ ty0s ty0 s2 ss ps ty t | s1 == s2 ->
-              let r'' = Env ((Nothing, Type.Path [], map (\ s -> (s, Type.Variable s)) ss, []) : r)
-               in Just $ (ss, envSigType r'' ps ty)
-            _ ->
-              Nothing
-envGetFunWithFields (Env r@((_, q, _, ds):r')) (Type.Path ((Type.Name s1 tys):ns)) = check $ search has ds
-  where check Nothing = unreachable "envGetFunWithFields 7"
-        check (Just r'') = envGetFunWithFields r'' (Type.Path ns)
-        has dec =
-          case dec of
-            Syntax.ModDec _ s2 ds | s1 == s2 ->
-              Just $ Env ((Nothing, Type.pathAddName q (Type.Name s1 tys), [], ds) : r)
-            Syntax.NewDec _ _ s2 q' tys' | s1 == s2 ->
-               let q'' = createPath q' (map (envConvertType (Env r)) tys')
-                in Just $ envGetUnit (Env r) q'' (Type.pathAddName q (Type.Name s1 tys))
-            _ ->
-              Nothing
+frameHasFunWithName :: Type.Name -> Syntax.Dec -> Maybe (M (Type.Path, Type.Type))
+frameHasFunWithName n@(Type.Name s1 tys) dec =
+  case dec of
+    Syntax.FunDec _ ty0s ty0 s2 ss ps ty t | s1 == s2 -> Just $
+      withEnvAddTypeVariables ss $ do
+        q' <- getPath
+        ty' <- envSigType ps ty
+        return (pathAddName q' n, ty')
+    Syntax.SumDec _ s2 ss cs ->
+      withEnvAddTypeVariables ss $ do
+        ty' <- return $ Type.Variant (Type.pathAddName q' (Type.Name s2 tys'))
+        search (sumHasFunWithName n) cs ty'
+    _ ->
+      Nothing
+
+sumHasFunWithName :: Type.Name -> (Syntax.Pos, String, [Syntax.Type]) -> Type.Type -> Maybe (M (Type.Path, Type.Type))
+sumHasFunWithName n@(Type.Name s1 tys) c ty' =
+  case c of
+    (_, s2, tys2) | s1 == s2 -> do
+      q' <- getPath
+      tys' <- mapM convertType tys2
+      return (pathAddName q' n, foldr Type.Arrow ty' tys')
+    _ ->
+      Nothing
+
+getFunWithField :: Type.Name -> M (Type.Path, Type.Type)
+getFunWithField n = do
+  Env r <- getEnv
+  case r of
+    [] -> case n of
+      Type.Name "Continue" _ -> continuePrimitive
+      Type.Name "Exit" _ -> exitPrimitive
+      Type.Name "Write" _ -> writePrimitive
+      _ -> unreachable $ "getFunWithField: " ++ show n
+    (Just q1, _, _, _) : r' ->
+      case (q1, n) of
+       (Type.Path [Type.Name "Escape" [ty1, ty2]], Type.Path [Type.Name "Catch" []]) -> catchPrimitive ty1 ty2
+       (Type.Path [Type.Name "Escape" [ty1, ty2]], Type.Path [Type.Name "Throw" []]) -> throwPrimitive ty1 ty2
+       _ -> unreachable $ "getFunWithField: " ++ show (pathAddName q1 n)
+    (Nothing, q, _, ds) : r' ->
+      case search (frameHasFunWithName n) ds of
+        Nothing -> withEnv r' (getFunWithField n)
+        Just m -> m
 
 exitPrimitive :: ([String], Type.Type)
 exitPrimitive = ([], Type.Variant (Type.Path [Type.Name "Output" []]))
@@ -295,41 +504,6 @@ throwPrimitive ty1 ty2 =
 envSigType :: Env -> [Syntax.Pat] -> Syntax.Type -> Type.Type
 envSigType r [] ty = envConvertType r ty
 envSigType r (p:ps) ty = Type.Arrow (envPatType r p) (envSigType r ps ty)
-
-convertType :: Syntax.Typ -> M Type.Type
-convertType ty = do
-  r <- getEnv
-  return $ envConvertType r ty
-
-envConvertType :: Env -> Syntax.Type -> Type.Type
-envConvertType r ty =
-  case ty of
-    Syntax.ArrowType ty1 ty2 -> Type.Arrow (envConvertType r ty1) (envConvertType r ty2)
-    Syntax.LowerType x -> envGetTypeVariable r x
-    Syntax.TupleType tys -> Type.Tuple (map (envConvertType r) tys)
-    Syntax.UnitType _ -> Type.Unit
-    Syntax.UpperType _ [("Result", [])] -> envGetType r (createPath ["Result"] (map (envConvertType r) tys))
-    Syntax.UpperType _ q -> envGetType r (createPath q (map (envConvertType r) tys))
-
-envGetTypeVariable :: Env -> String -> Type.Type
-envGetTypeVariable (Env []) s = unreachable $ "envGetTypeVariable: " ++ s
-envGetTypeVariable (Env ((_, _, xs, _) : r)) s = fromMaybe (envGetTypeVariable (Env r) s) (lookup s xs)
-
-getPatType :: Syntax.Pat -> M Type.Type
-getPatType p = do
-  r <- getEnv
-  return $ envPatType r p
-
--- For now constructor patterns in function declarations must have ascriptions.
-envPatType :: Env -> Syntax.Pat -> Type.Type
-envPatType r p =
-  case p of
-    Syntax.AscribePat _ p ty -> envConvertType r ty
-    Syntax.LowerPat _ x -> unreachable "envPatType"
-    Syntax.TuplePat _ _ ps -> Type.Tuple (map (envPatType r) ps)
-    Syntax.UnderbarPat -> unreachable "envPatType"
-    Syntax.UnitPat _ -> Type.Unit
-    Syntax.UpperPat _ _ _ q ps -> unreachable "envPatType"
 
 createPath :: [String] -> [Type.Type] -> Type.Path
 createPath [s] tys = Type.Path [Type.Name s tys]
@@ -480,37 +654,6 @@ convertQual ss tys = Type.Path (f ss)
         f [s] = [Type.Name s tys]
         f (s:ss) = Type.Name s [] : f ss
 
-run :: Env -> M Syntax.Dec -> Syntax.Dec
-run r m =  runM m r k 0
-  where k x _ = x
-
-newtype M a = M { runM :: Env -> (a -> Int -> Syntax.Dec) -> Int -> Syntax.Dec }
-
-instance Monad M where
-  return x = M (\ r k -> k x)
-  m >>= f = M (\ r k -> runM m r (\ x -> runM (f x) r k))
-
-getEnv :: M Env
-getEnv = M f
-  where f r k = k r
-
-withEnv :: Env -> M a -> M a
-withEnv r' m = M f
-  where f r k = runM m r' k
-
-gen :: M Type.Type
-gen = M f
-  where f r k i = k (Type.Metavariable i) (i + 1)
-
-search :: Alternative m => (a -> m b) -> [a] -> m b
-search f = choice . map f
--- search f [] = empty
--- search f (x:xs) = search f xs <|> f x -- maybe (search f xs) Just (f x)
-
-choice :: Alternative m => [m a] -> m a
-choice []     = empty
-choice (x:xs) = x <|> choice xs
-
 
 
 
@@ -547,12 +690,6 @@ createPath q = Type.Path (map f q)
 
 
 
-
-todo :: String -> a
-todo s = error $ "todo: Meta." ++ s
-
-unreachable :: String -> a
-unreachable s = error $ "unreachable: Meta." ++ s
 
 {-
 addMetavariables :: Program -> Program
@@ -942,3 +1079,25 @@ convertType (UnitTyp _)        = Type.Unit
 convertType (UpperTyp _ ["String"] _) = Type.String -- fix this
 convertType (UpperTyp _ q tys) = Type.Variant q (map convertType tys)
 -}
+
+
+
+-}
+
+
+-- Utility Functions
+
+search :: Alternative m => (a -> m b) -> [a] -> m b
+search f = choice . map f
+-- search f [] = empty
+-- search f (x:xs) = search f xs <|> f x -- maybe (search f xs) Just (f x)
+
+choice :: Alternative m => [m a] -> m a
+choice []     = empty
+choice (x:xs) = x <|> choice xs
+
+todo :: String -> a
+todo s = error $ "todo: Meta." ++ s
+
+unreachable :: String -> a
+unreachable s = error $ "unreachable: Meta." ++ s
