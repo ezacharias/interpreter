@@ -89,13 +89,13 @@ updateTerm t =
       return $ Syntax.SeqTerm t1 t2
     Syntax.StringTerm pos x ->
       return $ Syntax.StringTerm pos x
+    Syntax.UnitTerm pos ->
+      return $ Syntax.UnitTerm pos
     Syntax.UpperTerm pos _ _ q -> do
       _ <- todo $ "updateTerm: " ++ show t
       q' <- convertPath q
                    -- UpperTerm Pos Type.Path Type.Type Path
       return $ Syntax.UpperTerm pos (todo "updateTerm1") (todo "updateTerm2") q
-    Syntax.UnitTerm pos ->
-      return $ Syntax.UnitTerm pos
     Syntax.VariableTerm pos x ->
       return $ Syntax.VariableTerm pos x
     _ -> todo $ "updateTerm: " ++ show t

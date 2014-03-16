@@ -74,7 +74,11 @@ getSum q = do
 -- If we use a constructor as a function or in a pattern we must make sure the
 -- sum type is exported.
 exportFun :: Path -> Simple.Ident -> Syntax.Program -> M ()
+exportFun (Path [Name "Constant" [ty1, ty2]]) d prog = primitiveConstant ty1 ty2 d
+exportFun (Path [Name "Continue" []]) d prog = primitiveContinue d
 exportFun (Path [Name "Exit" []]) d prog = primitiveExit d
+exportFun (Path [Name "Write" []]) d prog = primitiveWrite d
+exportFun (Path [Name "Unreachable" [ty]]) d prog = primitiveUnreachable ty d
 exportFun p d prog = do
   let (ns, n) = splitPath p
   let (Syntax.Program decs) = prog
@@ -119,7 +123,7 @@ hasField q1 prog (Name s1 ty1s) m dec =
 
 exportFunWithName :: Simple.Ident -> Name -> [Syntax.Dec] -> M ()
 exportFunWithName d n decs =
-  fromMaybe (unreachable "exportFunWithName") (search (hasFunWithName d n) decs)
+  fromMaybe (unreachable $ "exportFunWithName: " ++ show n) (search (hasFunWithName d n) decs)
 
 exportSumWithName :: Simple.Ident -> Name -> [Syntax.Dec] -> M ()
 exportSumWithName d n decs =
@@ -145,9 +149,47 @@ hasSumWithName d (Name s1 ty1s) dec =
     Syntax.SumDec _ s2 _ _ | s1 == s2 -> todo "hasSumWithName"
     _ -> Nothing
 
+primitiveConstant :: Type -> Type -> Int -> M ()
+primitiveConstant ty1 ty2 d1 = do
+  d2 <- gen
+  d3 <- gen
+  ty1 <- elaborateType ty1
+  ty2 <- elaborateType ty2
+  addFun d1 $ Simple.Fun (Simple.ArrowType ty1 (Simple.ArrowType ty2 ty1)) $
+                Simple.LambdaTerm d2 (Simple.ArrowType ty1 (Simple.ArrowType ty2 ty1)) $
+                  Simple.LambdaTerm d3 (Simple.ArrowType ty2 ty1) $
+                    Simple.VariableTerm d2
+
+primitiveContinue :: Int -> M ()
+primitiveContinue d1 = do
+  d2 <- gen
+  addFun d1 $ Simple.Fun (Simple.ArrowType (Simple.ArrowType Simple.UnitType
+                                                             (Simple.SumType 0))
+                                           (Simple.SumType 0))
+                (Simple.LambdaTerm d2 (Simple.ArrowType Simple.UnitType
+                                                        (Simple.SumType 0))
+                  (Simple.ConstructorTerm 0 2 [Simple.VariableTerm d2]))
+
 primitiveExit :: Int -> M ()
 primitiveExit d =
   addFun d $ Simple.Fun (Simple.SumType 0) (Simple.ConstructorTerm 0 0 [])
+
+primitiveWrite :: Int -> M ()
+primitiveWrite d1 = do
+  d2 <- gen
+  d3 <- gen
+  addFun d1 $ Simple.Fun (Simple.ArrowType Simple.StringType
+                                           (Simple.ArrowType (Simple.SumType 0)
+                                                             (Simple.SumType 0)))
+                (Simple.LambdaTerm d2 Simple.StringType
+                  (Simple.LambdaTerm d3 (Simple.SumType 0)
+                    (Simple.ConstructorTerm 0 1 [Simple.VariableTerm d2, Simple.VariableTerm d3])))
+
+primitiveUnreachable :: Type -> Int -> M ()
+primitiveUnreachable ty d = do
+  ty <- elaborateType ty
+  addFun d $ Simple.Fun ty (Simple.UnreachableTerm ty)
+
 
 elaborateType :: Type -> M Simple.Type
 elaborateType ty = do
@@ -185,6 +227,12 @@ inUnit = todo "inUnit"
 elaborateTerm :: Syntax.Term -> M Simple.Term
 elaborateTerm t =
   case t of
+    Syntax.ApplyTerm _ t1 t2 -> do
+      t1 <- elaborateTerm t1
+      t2 <- elaborateTerm t2
+      return $ Simple.ApplyTerm t1 t2
+    Syntax.StringTerm _ x ->
+      return $ Simple.StringTerm x
     Syntax.SeqTerm t1 t2 -> do
       d <- gen
       t1 <- elaborateTerm t1
