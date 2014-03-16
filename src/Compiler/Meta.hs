@@ -20,7 +20,6 @@ addMetavariables p = run (programEnv p) $ updateProgram p
 data Env = Env [Frame]
            deriving (Show)
 type Frame = (Maybe Type.Path, Type.Path, [(String, Type.Type)], [Syntax.Dec])
---- Actualyl, I think the old path is only used by primitives.
 
 programEnv :: Syntax.Program -> Env
 programEnv (Syntax.Program ds) = Env [(Nothing, Type.Path [], [], ds)]
@@ -64,12 +63,6 @@ updateTerm (Syntax.UpperTerm pos _ _ [("Write", [])]) = return $ Syntax.UpperTer
                                                                                                   (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
                                                                                                               (Type.Variant (Type.Path [Type.Name "Output" []]))))
                                                                                       [("Write", [])]
-updateTerm (Syntax.UpperTerm pos _ _ [("Constant", [])]) = do
-  ty1 <- gen
-  ty2 <- gen
-  return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Constant" [ty1, ty2]])
-                                (Type.Arrow ty1 (Type.Arrow ty2 ty1))
-                                [("Constant", [])]
 updateTerm t =
   case t of
     Syntax.ApplyTerm _ t1 t2 -> do
@@ -92,10 +85,9 @@ updateTerm t =
     Syntax.UnitTerm pos ->
       return $ Syntax.UnitTerm pos
     Syntax.UpperTerm pos _ _ q -> do
-      _ <- todo $ "updateTerm: " ++ show t
       q' <- convertPath q
-                   -- UpperTerm Pos Type.Path Type.Type Path
-      return $ Syntax.UpperTerm pos (todo "updateTerm1") (todo "updateTerm2") q
+      (q', ty') <- getFun q'
+      return $ Syntax.UpperTerm pos q' ty' q
     Syntax.VariableTerm pos x ->
       return $ Syntax.VariableTerm pos x
     _ -> todo $ "updateTerm: " ++ show t
@@ -159,22 +151,108 @@ convertName (s, tys) = do
 getSum :: Type.Path -> M Type.Type
 getSum (Type.Path ns) =
   case ns of
-    [] -> unreachable "getSum"
-    [n] -> getSumWithName n
-    (n:ns) -> inModWithName n $
-                inModResolveFields ns $ \ n' ->
-                  getSumWithField n'
+    [] ->
+      unreachable "getSum"
+    [n] ->
+      getSumWithName n
+    (n1:ns) -> do
+      let (n2s, n3) = splitPath (Type.Path ns)
+      inModWithName n1 $
+        inResolveFields n2s $
+          getSumWithField n3
+
+-- Returns returns the full path of the function as well as the type.
+getFun :: Type.Path -> M (Type.Path, Type.Type)
+getFun (Type.Path ns) =
+  case ns of
+    [] ->
+      unreachable "getFun"
+    [n] ->
+      getFunWithName n
+    (n1:ns) -> do
+      let (n2s, n3) = splitPath (Type.Path ns)
+      inModWithName n1 $
+        inResolveFields n2s $
+          getFunWithField n3
+
+splitPath :: Type.Path -> ([Type.Name], Type.Name)
+splitPath (Type.Path ns) =
+  case reverse ns of
+    [] -> unreachable "splitPath"
+    (n:ns) -> (reverse ns, n)
+
+inModWithName :: Type.Name -> M a -> M a
+inModWithName = todo "inModWithName"
+
+inResolveFields :: [Type.Name] -> M a -> M a
+inResolveFields = todo "inResolveFields"
 
 getSumWithName :: Type.Name -> M Type.Type
-getSumWithName (Type.Name "Output" []) = return $ Type.Variant (Type.Path [Type.Name "Output" []])
-getSumWithName n = todo $ "getSumWithName: " ++ show n
+getSumWithName n = do
+  Env xs <- getEnv
+  case xs of
+    [] ->
+      case n of
+        Type.Name "String" [] ->
+          return Type.String
+        Type.Name "Output" [] ->
+          return $ Type.Variant (Type.Path [Type.Name "Output" []])
+        _ ->
+          unreachable "getSumWithName 2"
+    (x:xs) ->
+      case x of
+        (Nothing, _ , _, decs) ->
+          case search (hasSumWithName n) decs of
+            Nothing -> withEnv (Env xs) (getSumWithName n)
+            Just m -> m
+        (Just q, _, _, _) -> unreachable "getSumWithName 4"
+
+getFunWithName :: Type.Name -> M (Type.Path, Type.Type)
+getFunWithName n = do
+  Env xs <- getEnv
+  case xs of
+    [] ->
+      case n of
+        _ ->
+          unreachable $ "getFunWithName 2: " ++ show n
+    (x:xs) ->
+      case x of
+        (Nothing, _ , _, decs) ->
+          case search (hasFunWithName n) decs of
+            Nothing -> withEnv (Env xs) (getFunWithName n)
+            Just m -> m
+        (Just q, _, _, _) -> unreachable "getFunWithName 4"
+
+hasSumWithName :: Type.Name -> Syntax.Dec -> Maybe (M Type.Type)
+hasSumWithName (Type.Name s1 ty1s) dec =
+  case dec of
+    Syntax.SumDec _ s2 _ _ | s1 == s2 -> Just $ do
+      q <- getEnvPath
+      return $ Type.Variant (Type.pathAddName q (Type.Name s1 ty1s))
+    _ -> Nothing
+
+hasFunWithName :: Type.Name -> Syntax.Dec -> Maybe (M (Type.Path, Type.Type))
+hasFunWithName (Type.Name s1 ty1s) dec =
+  case dec of
+    Syntax.SumDec _ s2 _ _ -> todo $ "hasFunWithName: " ++ show s1
+    Syntax.FunDec _ _ _ s2 vs pats ty _ | s1 == s2 -> Just $ do
+      q <- getEnvPath
+      ty1s <- case ty1s of
+        [] -> mapM (const gen) vs
+        _ -> return ty1s
+      withEnvAddTypeVariables (zip vs ty1s) $ do
+        ty2s <- mapM convertPat pats
+        ty2 <- convertType ty
+        return (Type.pathAddName q (Type.Name s1 ty1s), foldr Type.Arrow ty2 ty2s)
+    _ -> Nothing
 
 getSumWithField :: Type.Name -> M Type.Type
 getSumWithField = todo "getSumWithField"
+
+getFunWithField :: Type.Name -> M (Type.Path, Type.Type)
+getFunWithField = todo "getFunWithField"
+
 {-
-  Syntax.UpperType _ [("Result", [])] ->envGetType r (createPath ["Result"] (map (envConvertType r) tys))
-  Syntax.UpperType _ q -> envGetType r (createPath q (map (envConvertType r) tys))
--}
 
 inMod :: Type.Path -> M a -> M a
 inMod (Type.Path ns) m =
@@ -256,11 +334,12 @@ inModWithField n m = inModWithName n m
 inUnit :: Type.Path -> Type.Path -> M a -> M a
 inUnit q q2 m =
   todo "inUnit"
+-}
 
 lookupTypeVariable :: String -> M Type.Type
 lookupTypeVariable s = do
   Env r <- getEnv
-  return $ fromMaybe (unreachable "lookupTypeVariable") (search has r)
+  return $ fromMaybe (unreachable $ "lookupTypeVariable: " ++ s) (search has r)
   where has (_, _, xs, _) = lookup s xs
 
 getEnvPath :: M Type.Path

@@ -4,5 +4,5 @@ The minimial program.
     Main : Output
       Write("Hello")(Continue(Constant(Exit)))
 
- -- Constant⟦a, b⟧(x : a)(y : b) : a
- --   x
+    Constant⟦a, b⟧(x : a)(y : b) : a
+      x

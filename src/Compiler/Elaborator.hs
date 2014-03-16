@@ -74,7 +74,6 @@ getSum q = do
 -- If we use a constructor as a function or in a pattern we must make sure the
 -- sum type is exported.
 exportFun :: Path -> Simple.Ident -> Syntax.Program -> M ()
-exportFun (Path [Name "Constant" [ty1, ty2]]) d prog = primitiveConstant ty1 ty2 d
 exportFun (Path [Name "Continue" []]) d prog = primitiveContinue d
 exportFun (Path [Name "Exit" []]) d prog = primitiveExit d
 exportFun (Path [Name "Write" []]) d prog = primitiveWrite d
@@ -149,17 +148,6 @@ hasSumWithName d (Name s1 ty1s) dec =
     Syntax.SumDec _ s2 _ _ | s1 == s2 -> todo "hasSumWithName"
     _ -> Nothing
 
-primitiveConstant :: Type -> Type -> Int -> M ()
-primitiveConstant ty1 ty2 d1 = do
-  d2 <- gen
-  d3 <- gen
-  ty1 <- elaborateType ty1
-  ty2 <- elaborateType ty2
-  addFun d1 $ Simple.Fun (Simple.ArrowType ty1 (Simple.ArrowType ty2 ty1)) $
-                Simple.LambdaTerm d2 (Simple.ArrowType ty1 (Simple.ArrowType ty2 ty1)) $
-                  Simple.LambdaTerm d3 (Simple.ArrowType ty2 ty1) $
-                    Simple.VariableTerm d2
-
 primitiveContinue :: Int -> M ()
 primitiveContinue d1 = do
   d2 <- gen
@@ -218,8 +206,48 @@ elaborateLambda (p:ps) (ty:tys) t = do
     return $ Simple.LambdaTerm d ty t
 elaborateLambda _ _ _ = unreachable "elaborateLambda"
 
-withPat :: Simple.Ident -> Syntax.Pat -> M a -> M a
-withPat = todo "withPat"
+-- This only works for singleton constructors.
+withPat :: Simple.Ident -> Syntax.Pat -> M Simple.Term -> M Simple.Term
+withPat d pat m =
+  case pat of
+    Syntax.AscribePat _ _ p _ ->
+      withPat d p m
+    Syntax.LowerPat _ s ->
+      withLowerBind s d m
+    Syntax.TuplePat _ _ ps -> do
+      ds <- mapM (const gen) ps
+      t <- withPats ds ps m
+      return $ Simple.UntupleTerm ds (Simple.VariableTerm d) t
+    Syntax.UnderbarPat ->
+      m
+    Syntax.UnitPat _ ->
+      m
+    -- Singleton cases are converted to tuples.
+    Syntax.UpperPat _ _ _ _ _ ps -> todo "withPat upper"
+    {-
+      case ps of
+        [] -> m
+        [p] -> withPat d p m
+        (_:_:_) -> do
+          ds <- mapM (const gen) ps
+          t <- withPats ds ps m
+          return $ Simple.UntupleTerm ds (Simple.VariableTerm d) t todo "withPat"
+    -}
+
+withPats :: [Simple.Ident] -> [Syntax.Pat] -> M Simple.Term -> M Simple.Term
+withPats [] [] m = m
+withPats (d:ds) (p:ps) m = withPat d p (withPats ds ps m)
+withPats _ _ _ = unreachable "withPats"
+
+-- This does not, from what I can see, require a type.
+withLowerBind :: String -> Simple.Ident -> M Simple.Term -> M Simple.Term
+withLowerBind s d m =
+  with (\ o -> o {valueVariables = (s, d) : valueVariables o}) m
+
+getLowerBind :: String -> M Simple.Ident
+getLowerBind s = do
+  r <- look valueVariables
+  return $ fromMaybe (unreachable "getLowerBind") (lookup s r)
 
 inUnit :: Type.Path -> ([Syntax.Dec] -> Maybe (M ())) -> M a
 inUnit = todo "inUnit"
@@ -244,6 +272,9 @@ elaborateTerm t =
       q <- groundPath q
       d <- getFun q
       return $ Simple.FunTerm d
+    Syntax.VariableTerm _ s -> do
+      d <- getLowerBind s
+      return $ Simple.VariableTerm d
     _ -> todo $ "elaborateTerm: " ++ show t
 
 -- If the start of the third path matches the first path, replace the start
@@ -281,6 +312,7 @@ data State = State
 
 data Look = Look
  { typeVariables :: [(String, Type)]
+ , valueVariables :: [(String, Simple.Ident)]
  , renamer :: Path -> Path
  }
 
@@ -291,6 +323,7 @@ instance Monad M where
 run :: M Simple.Program -> Simple.Program
 run m = runM m look (\ x _ -> x) state
   where look = Look { typeVariables = []
+                    , valueVariables = []
                     , renamer = id
                     }
         state = State { work = []
@@ -326,7 +359,9 @@ withTypeVariables :: [(String, Type)] -> M a -> M a
 withTypeVariables xs m = with (\ o -> o {typeVariables = xs ++ typeVariables o}) m
 
 getTypeVariable :: String -> M Type
-getTypeVariable = todo "getTypeVariable"
+getTypeVariable s = do
+  r <- look typeVariables
+  return $ fromMaybe (unreachable "getTypeVariable") (lookup s r)
 
 gen :: M Simple.Ident
 gen = do
