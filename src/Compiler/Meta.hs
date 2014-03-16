@@ -52,8 +52,66 @@ updateDec dec =
       todo "updateDec unit"
 
 updateTerm :: Syntax.Term -> M Syntax.Term
-updateTerm (Syntax.UpperTerm pos _ _ [("Exit", [])]) = return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Exit" []]) (Type.Variant (Type.Path [Type.Name "Output" []])) [("Exit", [])]
-updateTerm t = todo $ "updateTerm: " ++ show t
+updateTerm (Syntax.UpperTerm pos _ _ [("Continue", [])]) = return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Continue" []])
+                                                                                         (Type.Arrow (Type.Arrow Type.Unit (Type.Variant (Type.Path [Type.Name "Output" []])))
+                                                                                                     (Type.Variant (Type.Path [Type.Name "Output" []])))
+                                                                                         [("Continue", [])]
+updateTerm (Syntax.UpperTerm pos _ _ [("Exit", [])]) = return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Exit" []])
+                                                                                     (Type.Variant (Type.Path [Type.Name "Output" []]))
+                                                                                     [("Exit", [])]
+updateTerm (Syntax.UpperTerm pos _ _ [("Write", [])]) = return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Write" []])
+                                                                                      (Type.Arrow Type.String
+                                                                                                  (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
+                                                                                                              (Type.Variant (Type.Path [Type.Name "Output" []]))))
+                                                                                      [("Write", [])]
+updateTerm (Syntax.UpperTerm pos _ _ [("Constant", [])]) = do
+  ty1 <- gen
+  ty2 <- gen
+  return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Constant" [ty1, ty2]])
+                                (Type.Arrow ty1 (Type.Arrow ty2 ty1))
+                                [("Constant", [])]
+updateTerm t =
+  case t of
+    Syntax.ApplyTerm _ t1 t2 -> do
+      ty <- gen
+      t1 <- updateTerm t1
+      t2 <- updateTerm t2
+      return $ Syntax.ApplyTerm ty t1 t2
+    Syntax.BindTerm _ p t1 t2 -> do
+      ty <- gen
+      p <- updatePat p
+      t1 <- updateTerm t1
+      t2 <- updateTerm t2
+      return $ Syntax.BindTerm ty p t1 t2
+    Syntax.SeqTerm t1 t2 -> do
+      t1 <- updateTerm t1
+      t2 <- updateTerm t2
+      return $ Syntax.SeqTerm t1 t2
+    Syntax.StringTerm pos x ->
+      return $ Syntax.StringTerm pos x
+    Syntax.UpperTerm pos _ _ q -> do
+      _ <- todo $ "updateTerm: " ++ show t
+      q' <- convertPath q
+                   -- UpperTerm Pos Type.Path Type.Type Path
+      return $ Syntax.UpperTerm pos (todo "updateTerm1") (todo "updateTerm2") q
+    Syntax.UnitTerm pos ->
+      return $ Syntax.UnitTerm pos
+    Syntax.VariableTerm pos x ->
+      return $ Syntax.VariableTerm pos x
+    _ -> todo $ "updateTerm: " ++ show t
+
+updatePat :: Syntax.Pat -> M Syntax.Pat
+updatePat p =
+  case p of
+    Syntax.AscribePat pos _ p ty -> do
+      ty' <- convertType ty
+      p <- updatePat p
+      return $ Syntax.AscribePat pos ty' p ty
+    Syntax.LowerPat pos x ->
+      return $ Syntax.LowerPat pos x
+    Syntax.UnitPat pos ->
+      return $ Syntax.UnitPat pos
+    _ -> todo $ "updatePat: " ++ show p
 
 -- The pattern must be fully typed to use this; i.e. function parameters.
 -- Theoretically, getting an upper pat could require unification, so we don't

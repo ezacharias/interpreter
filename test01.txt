@@ -2,4 +2,7 @@ The minimial program.
 
 
     Main : Output
-      Exit
+      Write("Hello")(Continue(Constant(Exit)))
+
+    Constant⟦a, b⟧(x : a)(y : b) : a
+      x

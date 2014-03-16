@@ -1,8 +1,6 @@
---  LANGUAGE RecordWildCards #-}
-
 module Compiler.Elaborator where
 
-import           Control.Monad   (MonadPlus, mzero)
+import           Control.Monad   (MonadPlus, mzero, liftM, liftM2)
 import qualified Data.IntMap     as IdentMap
 import           Data.Map        (Map)
 import qualified Data.Map        as Map
@@ -16,112 +14,158 @@ import qualified Compiler.Type   as Type
 
 type IdentMap = IdentMap.IntMap
 
+-- To elaborate we simply get the identifier for Main. This will add
+-- elaboration of Main to the work queue. When finish is called, Main will be
+-- elaborated, which will in turn add more work to the work queue and so on.
 elaborate :: Syntax.Program -> Simple.Program
-elaborate p = run p $ do
-  d <- getFun (Type.Path [(Type.Name "Main" [])])
-  finish
+elaborate p = run $ do
+  d <- getFun $ Path [(Name "Main" [])]
+  finish p
   x1 <- get programTags
   x2 <- get programSums
   x3 <- get programFuns
   return $ Simple.Program x1 x2 x3 d
 
-finish :: M ()
-finish = do
+-- Run until the work queue is empty.
+finish :: Syntax.Program -> M ()
+finish p = do
   w <- get work
   case w of
     [] ->
       return ()
     (m : w) -> do
+      -- It is necessary to set the work queue before running m because m
+      -- may modify the work queue.
       set (\ s -> s {work = w})
-      m
-      finish
+      m p
+      finish p
 
 -- This uses a fully qualified name. First we check to see if the function has
 -- already been exported. If not, we export it.
-getFun :: Type.Path -> M Simple.Ident
+getFun :: Path -> M Simple.Ident
 getFun q = do
   x <- get exportedFuns
   case Map.lookup q x of
+    Just d -> return d
     Nothing -> do
       d <- gen
       set (\ s -> s {exportedFuns = Map.insert q d x})
-      addWork (elaborateFun q d)
+      addWork $ exportFun q d
       return d
+
+-- Are we properly handling sums of zero and one constructor with this? This
+-- should perhaps return a type.
+getSum :: Path -> M Simple.Ident
+getSum q = do
+  x <- get exportedSums
+  case Map.lookup q x of
     Just d -> return d
+    Nothing -> do
+      case q of
+        Path [Name "Output" []] -> do
+          set (\ s -> s {exportedSums = Map.insert q 0 x})
+          return 0
+        _ -> do
+          d <- gen
+          set (\ s -> s {exportedSums = Map.insert q d x})
+          addWork $ exportSum q d
+          return d
 
-elaborateFun :: Type.Path -> Simple.Ident -> M ()
-elaborateFun (Type.Path ns) d = do
-  Syntax.Program ds <- look program
-  elaborateFunWithFields ns d ds
+-- If we use a constructor as a function or in a pattern we must make sure the
+-- sum type is exported.
+exportFun :: Path -> Simple.Ident -> Syntax.Program -> M ()
+exportFun (Path [Name "Exit" []]) d prog = primitiveExit d
+exportFun p d prog = do
+  let (ns, n) = splitPath p
+  let (Syntax.Program decs) = prog
+  resolveFields p prog decs ns $ \ p prog decs ->
+    exportFunWithName d n decs
 
-elaborateFunWithFields :: [Type.Name] -> Simple.Ident -> [Syntax.Dec] -> M ()
-elaborateFunWithFields ns d decs =
+exportSum :: Path -> Simple.Ident -> Syntax.Program -> M ()
+exportSum p d prog = do
+  let (ns, n) = splitPath p
+  let (Syntax.Program decs) = prog
+  resolveFields p prog decs ns $ \ p prog decs ->
+    exportSumWithName d n decs
+
+splitPath :: Path -> ([Name], Name)
+splitPath (Path ns) =
+  case reverse ns of
+    [] -> unreachable "splitPath"
+    (n:ns) -> (reverse ns, n)
+
+resolveFields :: Path -> Syntax.Program -> [Syntax.Dec] -> [Name] -> (Path -> Syntax.Program -> [Syntax.Dec] -> M a)-> M a
+resolveFields p prog decs ns m =
   case ns of
-    [Type.Name "Exit" []] -> primitiveExit d
-    [] -> unreachable "elaborateFunWithFields"
-    [n] -> fromMaybe (unreachable $ "elaborateFunWithFields: " ++ show n) (search (hasFunWithField n d) decs)
-    (n:ns) -> todo "elaborateFunWithFields2"
+    [] -> m p prog decs
+    (n:ns) -> resolveField n p prog decs $ \ p prog decs ->
+                resolveFields p prog decs ns m
+
+resolveField :: Name -> Path -> Syntax.Program -> [Syntax.Dec] -> (Path -> Syntax.Program -> [Syntax.Dec] -> M a)-> M a
+resolveField p prog n decs m =
+  todo "resolveField"
+
+hasField :: Path -> Syntax.Program -> Name -> (Path -> Syntax.Program -> [Syntax.Dec] -> M a) -> Syntax.Dec -> Maybe (M a)
+hasField q1 prog (Name s1 ty1s) m dec =
+  case dec of
+    Syntax.ModDec _ s2 vs decs | s1 == s2 -> Just $ m q1 prog decs
+    Syntax.NewDec _ (Type.Path ns) s2 vs _ | s1 == s2 -> Just $ do
+      let Syntax.Program decs = prog
+      withTypeVariables (zip vs ty1s) $ do
+        ns <- mapM groundName ns
+        withRename (createRename (Path ns) q1) $
+          resolveFields (Path ns) prog decs ns m
+    _ -> Nothing
+
+exportFunWithName :: Simple.Ident -> Name -> [Syntax.Dec] -> M ()
+exportFunWithName d n decs =
+  fromMaybe (unreachable "exportFunWithName") (search (hasFunWithName d n) decs)
+
+exportSumWithName :: Simple.Ident -> Name -> [Syntax.Dec] -> M ()
+exportSumWithName d n decs =
+  fromMaybe (unreachable "exportSumWithName") (search (hasSumWithName d n) decs)
+
+hasFunWithName :: Simple.Ident -> Name -> Syntax.Dec -> Maybe (M ())
+hasFunWithName d (Name s1 ty1s) dec =
+  case dec of
+    Syntax.FunDec _ ty2s ty2 s2 vs pats _ t | s1 == s2 -> Just $ do
+      withTypeVariables (zip vs ty1s) $ do
+        ty2s <- mapM groundType ty2s
+        ty2 <- groundType ty2
+        ty2s <- mapM elaborateType ty2s
+        ty2 <- elaborateType ty2
+        t <- elaborateLambda pats ty2s t
+        addFun d (Simple.Fun (foldr Simple.ArrowType ty2 ty2s) t)
+    Syntax.SumDec _ _ _ _ -> Nothing -- todo
+    _ -> Nothing
+
+hasSumWithName :: Simple.Ident -> Name -> Syntax.Dec -> Maybe (M ())
+hasSumWithName d (Name s1 ty1s) dec =
+  case dec of
+    Syntax.SumDec _ s2 _ _ | s1 == s2 -> todo "hasSumWithName"
+    _ -> Nothing
 
 primitiveExit :: Int -> M ()
 primitiveExit d =
   addFun d $ Simple.Fun (Simple.SumType 0) (Simple.ConstructorTerm 0 0 [])
 
-hasFunWithField :: Type.Name -> Simple.Ident -> Syntax.Dec -> Maybe (M ())
-hasFunWithField (Type.Name s1 tys) d dec =
-  case dec of
-    Syntax.FunDec _ tys ty s2 vs pats _ t | s1 == s2 -> Just $ do
-      withTypeVariables (zip vs (todo "hasFunWithField")) $ do
-        tys <- mapM elaborateType tys
-        ty <- elaborateType ty
-        t <- elaborateLambda pats tys t
-        addFun d (Simple.Fun (foldr Simple.ArrowType ty tys) t)
-    Syntax.SumDec _ _ _ _ -> Nothing -- todo
-    _ -> Nothing
-
-elaborateType :: Type.Type -> M Simple.Type
-elaborateType ty =
+elaborateType :: Type -> M Simple.Type
+elaborateType ty = do
   case ty of
-    Type.Arrow ty1 ty2 -> do
+    Arrow ty1 ty2 -> do
       ty1 <- elaborateType ty1
       ty2 <- elaborateType ty2
       return $ Simple.ArrowType ty1 ty2
-    Type.Metavariable _ ->
-      unreachable $ "elaborateType: " ++ show ty
-    Type.String ->
+    String ->
       return $ Simple.StringType
-    Type.Tuple tys -> do
+    Tuple tys -> do
       tys <- mapM elaborateType tys
       return $ Simple.TupleType tys
-    Type.Unit ->
+    Unit ->
        return $ Simple.UnitType
-    Type.Variable x ->
-      unreachable $ "elaborateType: " ++ show ty
-    Type.Variant q -> do
+    Sum q -> do
       d <- getSum q
       return $ Simple.SumType d
-
-getSum :: Type.Path -> M Simple.Ident
-getSum q = do
-  x <- get exportedSums
-  case Map.lookup q x of
-    Nothing -> do
-      d <- gen
-      set (\ s -> s {exportedSums = Map.insert q d x})
-      addWork $ elaborateSum q d
-      return d
-    Just d -> return d
-
-elaborateSum :: Type.Path -> Simple.Ident -> M ()
-elaborateSum (Type.Path ns) d = do
-  Syntax.Program ds <- look program
-  elaborateSumWithFields ns d ds
-
-elaborateSumWithFields :: [Type.Name] -> Simple.Ident -> [Syntax.Dec] -> M ()
-elaborateSumWithFields ns d decs =
-  case ns of
-    [] -> unreachable "elaborateSumWithFields"
-    [n] -> todo "elaborateSumWithFields1" -- fromMaybe (unreachable $ "elaborateFunWithFields: " ++ show n) (search (hasFunWithField n d) decs)
-    (n:ns) -> todo "elaborateSumWithFields2"
 
 elaborateLambda :: [Syntax.Pat] -> [Simple.Type] -> Syntax.Term -> M Simple.Term
 elaborateLambda []     []       t = elaborateTerm t
@@ -135,34 +179,36 @@ elaborateLambda _ _ _ = unreachable "elaborateLambda"
 withPat :: Simple.Ident -> Syntax.Pat -> M a -> M a
 withPat = todo "withPat"
 
-inModuleWithField :: Type.Name -> Syntax.Dec -> ([Syntax.Dec] -> Maybe (M ())) -> Maybe (M ())
-inModuleWithField (Type.Name s1 tys) dec k =
-  case dec of
-    Syntax.ModDec _ s2 vs decs | s1 == s2 -> k decs
-    Syntax.NewDec _ q2 s2 vs _ | s1 == s2 -> Just $ withRename (createRename q2 q1) (inUnit q2 k)
-    _ -> Nothing
-  where q1 = todo "inModuleWithField"
-
 inUnit :: Type.Path -> ([Syntax.Dec] -> Maybe (M ())) -> M a
 inUnit = todo "inUnit"
-
-createRename :: Type.Path -> Type.Path -> (Type.Path -> Type.Path)
-createRename q2 q1 q3 = fromMaybe q3 (createRename2 q2 q1 q3)
-
-createRename2 :: Type.Path -> Type.Path -> Type.Path -> Maybe Type.Path
-createRename2 q2 q1 q3 = todo "createRename2"
 
 elaborateTerm :: Syntax.Term -> M Simple.Term
 elaborateTerm t =
   case t of
-    -- Syntax.UpperTerm _ tys _ ss _ -> do
+    Syntax.SeqTerm t1 t2 -> do
+      d <- gen
+      t1 <- elaborateTerm t1
+      t2 <- elaborateTerm t2
+      return $ Simple.BindTerm d t1 t2
+    Syntax.UnitTerm pos ->
+      return $ Simple.UnitTerm
     Syntax.UpperTerm _ q _ _ -> do
-      -- tys <- mapM updateType tys
-      d <- getFun q -- todo remove type variables
+      q <- groundPath q
+      d <- getFun q
       return $ Simple.FunTerm d
     _ -> todo $ "elaborateTerm: " ++ show t
 
-addWork :: M () -> M ()
+-- If the start of the third path matches the first path, replace the start
+-- with the second path. This is used for unit instantiation.
+createRename :: Path -> Path -> (Path -> Path)
+createRename (Path n1s) (Path n2s) (Path n3s) = Path $ fromMaybe n3s (createRename2 n1s n2s n3s)
+
+createRename2 :: [Name] -> [Name] -> [Name] -> Maybe [Name]
+createRename2 [] n2s n3s = Just $ n2s ++ n3s
+createRename2 (n1:n1s) n2s (n3:n3s) | n1 == n3 = createRename2 n1s n2s n3s
+createRename2 _ _ _ = Nothing
+
+addWork :: (Syntax.Program -> M ()) -> M ()
 addWork m = do
   w <- get work
   set (\ s -> s {work = (m : w)})
@@ -175,45 +221,43 @@ addFun d x = do
 newtype M a = M { runM :: Look -> (a -> State -> Simple.Program) -> State -> Simple.Program }
 
 data State = State
- { work :: [M ()]
+ { work :: [Syntax.Program -> M ()]
  , ident :: Simple.Ident
- , exportedTags :: Map Type.Path Int
- , exportedSums :: Map Type.Path Int
- , exportedFuns :: Map Type.Path Int
+ , exportedTags :: Map Path Simple.Ident
+ , exportedSums :: Map Path Simple.Ident
+ , exportedFuns :: Map Path Simple.Ident
  , programTags :: Simple.IdentMap Simple.Tag
  , programSums :: Simple.IdentMap Simple.Sum
  , programFuns :: Simple.IdentMap Simple.Fun
  }
 
 data Look = Look
- { program :: Syntax.Program
- , typeVariables :: [(String, Simple.Type)]
- , renamer :: Type.Path -> Type.Path
+ { typeVariables :: [(String, Type)]
+ , renamer :: Path -> Path
  }
 
 instance Monad M where
   return x = M (\ o k -> k x)
   m >>= f = M (\ o k -> runM m o (\ x -> runM (f x) o k))
 
-run :: Syntax.Program -> M Simple.Program -> Simple.Program
-run p m = runM m look (\ x _ -> x) state
-  where look = Look { program = p
-                    , typeVariables = []
+run :: M Simple.Program -> Simple.Program
+run m = runM m look (\ x _ -> x) state
+  where look = Look { typeVariables = []
                     , renamer = id
                     }
         state = State { work = []
                       , ident = 100
                       , exportedTags = Map.empty
-                      , exportedSums = Map.fromList [(Type.Path [Type.Name "Output" []], 0)]
+                      , exportedSums = Map.empty
                       , exportedFuns = Map.empty
                       , programTags = IdentMap.empty
                       , programSums = IdentMap.empty
                       , programFuns = IdentMap.empty
                       }
 
-rename :: Type.Path -> M Type.Path
-rename q = do f <- look renamer
-              return $ f q
+renamePath :: Path -> M Path
+renamePath q = do f <- look renamer
+                  return $ f q
 
 get :: (State -> a) -> M a
 get f = M (\ o k d -> k (f d) d)
@@ -227,17 +271,51 @@ look f = M (\ o k d -> k (f o) d)
 with :: (Look -> Look) -> M a -> M a
 with f m = M (\ o k d -> runM m (f o) k d)
 
-withRename :: (Type.Path -> Type.Path) -> M a -> M a
+withRename :: (Path -> Path) -> M a -> M a
 withRename f m = with (\ o -> o {renamer = renamer o . f}) m
 
-withTypeVariables :: [(String, Simple.Type)] -> M a -> M a
+withTypeVariables :: [(String, Type)] -> M a -> M a
 withTypeVariables xs m = with (\ o -> o {typeVariables = xs ++ typeVariables o}) m
+
+getTypeVariable :: String -> M Type
+getTypeVariable = todo "getTypeVariable"
 
 gen :: M Simple.Ident
 gen = do
   d <- get ident
   set (\ s -> s {ident = d + 1})
   return d
+
+data Path = Path { pathNames :: [Name] }
+ deriving (Eq, Ord, Show)
+
+data Name = Name String [Type]
+ deriving (Eq, Ord, Show)
+
+data Type = Arrow Type Type
+          | String
+          | Tuple { tupleElems :: [Type] }
+          | Unit
+          | Sum Path
+ deriving (Eq, Ord, Show)
+
+-- Eliminates type variables and adjusts it for unit instantiation.
+groundPath :: Type.Path -> M Path
+groundPath (Type.Path ns) = liftM Path (mapM groundName ns) >>= renamePath
+
+groundName :: Type.Name -> M Name
+groundName (Type.Name s tys) = liftM (Name s) (mapM groundType tys)
+
+groundType :: Type.Type -> M Type
+groundType ty =
+  case ty of
+    Type.Arrow ty1 ty2 -> liftM2 Arrow (groundType ty1) (groundType ty2)
+    Type.Metavariable _ -> unreachable $ "groundType: metavariable"
+    Type.String -> return $ String
+    Type.Tuple tys -> liftM Tuple (mapM groundType tys)
+    Type.Unit -> return $ Unit
+    Type.Variable x -> getTypeVariable x
+    Type.Variant q -> liftM Sum (groundPath q)
 
 {-
 
