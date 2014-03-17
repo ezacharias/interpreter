@@ -105,13 +105,14 @@ resolveFields p prog decs ns m =
                 resolveFields p prog decs ns m
 
 resolveField :: Name -> Path -> Syntax.Program -> [Syntax.Dec] -> (Path -> Syntax.Program -> [Syntax.Dec] -> M a)-> M a
-resolveField p prog n decs m =
-  todo "resolveField"
+resolveField n p prog decs m = fromMaybe (unreachable "resolveField") (search (hasField p prog n m) decs)
 
 hasField :: Path -> Syntax.Program -> Name -> (Path -> Syntax.Program -> [Syntax.Dec] -> M a) -> Syntax.Dec -> Maybe (M a)
 hasField q1 prog (Name s1 ty1s) m dec =
   case dec of
-    Syntax.ModDec _ s2 vs decs | s1 == s2 -> Just $ m q1 prog decs
+    Syntax.ModDec _ s2 vs decs | s1 == s2 -> Just $ do
+      withTypeVariables (zip vs ty1s) $ do
+        m q1 prog decs
     Syntax.NewDec _ (Type.Path ns) s2 vs _ | s1 == s2 -> Just $ do
       let Syntax.Program decs = prog
       withTypeVariables (zip vs ty1s) $ do

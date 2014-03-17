@@ -2,7 +2,7 @@ The minimial program.
 
 
     Main : Output
-      Write(BoolToString(True))(Continue(Constant(Exit)))
+      Write(Identity.Identity(Bool.ToString(True)))(Continue(Constant(Exit)))
 
 
 Booleans
@@ -12,8 +12,10 @@ Booleans
       False
       True
 
-    BoolToString(x : Bool) : String
-      "True"
+    mod Bool
+
+      ToString(x : Bool) : String
+        "True"
 
 
 Utility Functions
@@ -21,3 +23,8 @@ Utility Functions
 
     Constant⟦a, b⟧(x : a)(y : b) : a
       x
+
+    mod Identity⟦a⟧
+
+      Identity(x : a) : a
+        x

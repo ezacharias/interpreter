@@ -38,8 +38,11 @@ updateDec dec =
         ty' <- convertType ty
         t <- updateTerm t
         return $ Syntax.FunDec pos tys' ty' s vs ps ty t
-    Syntax.ModDec pos s vs ds -> do
-      todo "updateDec mod"
+    Syntax.ModDec pos s vs decs -> do
+      q <- getEnvPath
+      withEnvAddFrame (Nothing, Type.pathAddName q (Type.Name s (map Type.Variable vs)), typeParameters vs, decs) $ do
+        decs <- mapM updateDec decs
+        return $ Syntax.ModDec pos s vs decs
     Syntax.NewDec pos _ s vs q -> do
       todo "updateDec new"
     Syntax.SubDec pos _ s vs q ->
@@ -190,10 +193,29 @@ splitPath (Type.Path ns) =
     (n:ns) -> (reverse ns, n)
 
 inModWithName :: Type.Name -> M a -> M a
-inModWithName = todo "inModWithName"
+inModWithName n m = do
+  Env xs <- getEnv
+  case xs of
+    [] ->
+      case n of
+        _ ->
+          unreachable $ "inModWithName 1: " ++ show n
+    (x:xs) ->
+      case x of
+        (Nothing, _ , _, decs) ->
+          case search (hasModWithName n m) decs of
+            Nothing -> withEnv (Env xs) (inModWithName n m)
+            Just m -> m
+        (Just q, _, _, _) -> unreachable "inModWithName 2"
 
 inResolveFields :: [Type.Name] -> M a -> M a
-inResolveFields = todo "inResolveFields"
+inResolveFields ns m =
+  case ns of
+    [] -> m
+    (n:ns) -> inResolveField n (inResolveFields ns m)
+
+inResolveField :: Type.Name -> M a -> M a
+inResolveField n m = inModWithName n m
 
 getSumWithName :: Type.Name -> M Type.Type
 getSumWithName n = do
@@ -230,6 +252,17 @@ getFunWithName n = do
             Nothing -> withEnv (Env xs) (getFunWithName n)
             Just m -> m
         (Just q, _, _, _) -> unreachable "getFunWithName 4"
+
+hasModWithName :: Type.Name -> M a -> Syntax.Dec -> Maybe (M a)
+hasModWithName (Type.Name s1 ty1s) m dec =
+  case dec of
+    Syntax.ModDec _ s2 vs decs | s1 == s2 -> Just $ do
+      q <- getEnvPath
+      ty1s <- case ty1s of
+        [] -> mapM (const gen) vs
+        _ -> return ty1s
+      withEnvAddFrame (Nothing, Type.pathAddName q (Type.Name s1 ty1s), zip vs ty1s, decs) m
+    _ -> Nothing
 
 hasSumWithName :: Type.Name -> Syntax.Dec -> Maybe (M Type.Type)
 hasSumWithName (Type.Name s1 ty1s) dec =
@@ -270,7 +303,7 @@ getSumWithField :: Type.Name -> M Type.Type
 getSumWithField = todo "getSumWithField"
 
 getFunWithField :: Type.Name -> M (Type.Path, Type.Type)
-getFunWithField = todo "getFunWithField"
+getFunWithField n = getFunWithName n
 
 {-
 
