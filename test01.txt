@@ -2,7 +2,22 @@ The minimial program.
 
 
     Main : Output
-      Write("Hello")(Continue(Constant(Exit)))
+      Write(BoolToString(True))(Continue(Constant(Exit)))
+
+
+Booleans
+
+
+    sum Bool
+      False
+      True
+
+    BoolToString(x : Bool) : String
+      "True"
+
+
+Utility Functions
+
 
     Constant⟦a, b⟧(x : a)(y : b) : a
       x

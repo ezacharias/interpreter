@@ -503,14 +503,14 @@ sumDec = do
                , return []
                ]
   e3 <- many $ indented (c + 2) constructor
-  return $ Syntax.SumDec pos e1 e2 e3
+  return $ Syntax.SumDec pos (Type.Path []) e1 e2 e3
 
-constructor :: AmbiguousParser (Syntax.Pos, String, [Syntax.Type])
+constructor :: AmbiguousParser (Syntax.Pos, [Type.Type], String, [Syntax.Type])
 constructor = do
   pos <- position
   e1 <- upper
   e2 <- many typ2
-  return (pos, e1, e2)
+  return (pos, [], e1, e2)
 
 modDec :: AmbiguousParser Syntax.Dec
 modDec = do

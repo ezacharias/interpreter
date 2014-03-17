@@ -45,10 +45,18 @@ updateDec dec =
     Syntax.SubDec pos _ s vs q ->
       todo "updateDec sub"
     -- Do we want to add some information here?
-    Syntax.SumDec pos s ss cs ->
-      todo "updateDec sum"
+    Syntax.SumDec pos _ s vs cs -> do
+      q <- getEnvPath
+      let q' = Type.pathAddName q (Type.Name s (map Type.Variable vs))
+      cs <- mapM updateConstructor cs
+      return $ Syntax.SumDec pos q' s vs cs
     Syntax.UnitDec pos s vs ds ->
       todo "updateDec unit"
+
+updateConstructor :: (Syntax.Pos, [Type.Type], String, [Syntax.Type]) -> M (Syntax.Pos, [Type.Type], String, [Syntax.Type])
+updateConstructor (pos, _, s, ty1s) = do
+  ty2s <- mapM convertType ty1s
+  return (pos, ty2s, s, ty1s)
 
 updateTerm :: Syntax.Term -> M Syntax.Term
 updateTerm (Syntax.UpperTerm pos _ _ [("Continue", [])]) = return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Continue" []])
@@ -226,7 +234,7 @@ getFunWithName n = do
 hasSumWithName :: Type.Name -> Syntax.Dec -> Maybe (M Type.Type)
 hasSumWithName (Type.Name s1 ty1s) dec =
   case dec of
-    Syntax.SumDec _ s2 _ _ | s1 == s2 -> Just $ do
+    Syntax.SumDec _ _ s2 _ _ | s1 == s2 -> Just $ do
       q <- getEnvPath
       return $ Type.Variant (Type.pathAddName q (Type.Name s1 ty1s))
     _ -> Nothing
@@ -234,7 +242,19 @@ hasSumWithName (Type.Name s1 ty1s) dec =
 hasFunWithName :: Type.Name -> Syntax.Dec -> Maybe (M (Type.Path, Type.Type))
 hasFunWithName (Type.Name s1 ty1s) dec =
   case dec of
-    Syntax.SumDec _ s2 _ _ -> todo $ "hasFunWithName: " ++ show s1
+    Syntax.SumDec _ _ s2 vs cs ->
+      let has (_, _, s3, ty2s) | s1 == s3 = Just $ do
+            q <- getEnvPath
+            ty1s <- case ty1s of
+              [] -> mapM (const gen) vs
+              _ -> return ty1s
+            withEnvAddTypeVariables (zip vs ty1s) $ do
+              ty2s <- mapM convertType ty2s
+              let q2 = Type.pathAddName q (Type.Name s2 ty1s)
+              let ty2 = Type.Variant q2
+              return (Type.pathAddName q (Type.Name s3 ty1s), foldr Type.Arrow ty2 ty2s)
+          has _ = Nothing
+       in search has cs
     Syntax.FunDec _ _ _ s2 vs pats ty _ | s1 == s2 -> Just $ do
       q <- getEnvPath
       ty1s <- case ty1s of

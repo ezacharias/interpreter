@@ -15,7 +15,7 @@ data Dec = FunDec Pos [Type.Type] Type.Type String [String] [Pat] Type Term
          -- ^ Global path
          | SubDec Pos Type.Path String [String] Path
          -- ^ Global path
-         | SumDec Pos String [String] [(Pos, String, [Type])]
+         | SumDec Pos Type.Path String [String] [(Pos, [Type.Type], String, [Type])]
          | UnitDec Pos String [String] [Dec]
            deriving (Eq, Show)
 

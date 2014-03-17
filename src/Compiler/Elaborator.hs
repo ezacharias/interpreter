@@ -139,13 +139,27 @@ hasFunWithName d (Name s1 ty1s) dec =
         ty2 <- elaborateType ty2
         t <- elaborateLambda pats ty2s t
         addFun d (Simple.Fun (foldr Simple.ArrowType ty2 ty2s) t)
-    Syntax.SumDec _ _ _ _ -> Nothing -- todo
+    Syntax.SumDec _ q s2 vs cs ->
+      let has (i, (_, ty2s, s3, _)) | s1 == s3 = Just $ do
+            withTypeVariables (zip vs ty1s) $ do
+              ty2s <- mapM groundType ty2s
+              ty2s <- mapM elaborateType ty2s
+              d2s <- mapM (const gen) ty2s
+              q <- groundPath q
+              d3 <- getSum q
+              let t2 = Simple.ConstructorTerm d3 i (map Simple.VariableTerm d2s)
+              addFun d (Simple.Fun (foldr Simple.ArrowType (Simple.SumType d3) ty2s)
+                         (foldr (\ (d2, ty2) t2 -> Simple.LambdaTerm d2 ty2 t2) t2 (zip d2s ty2s)))
+          has _ = Nothing
+       in search has (zip [0..] cs)
     _ -> Nothing
 
 hasSumWithName :: Simple.Ident -> Name -> Syntax.Dec -> Maybe (M ())
 hasSumWithName d (Name s1 ty1s) dec =
   case dec of
-    Syntax.SumDec _ s2 _ _ | s1 == s2 -> todo "hasSumWithName"
+    Syntax.SumDec _ q s2 _ cs | s1 == s2 -> Just $ do
+      tyss <- mapM (\ (_, tys, _, _) -> mapM (\ ty -> elaborateType =<< groundType ty) tys) cs
+      addSum d (Simple.Sum tyss)
     _ -> Nothing
 
 primitiveContinue :: Int -> M ()
@@ -296,6 +310,11 @@ addFun :: Simple.Ident -> Simple.Fun -> M ()
 addFun d x = do
   xs <- get programFuns
   set (\ s -> s {programFuns = IdentMap.insert d x xs})
+
+addSum :: Simple.Ident -> Simple.Sum -> M ()
+addSum d x = do
+  xs <- get programSums
+  set (\ s -> s {programSums = IdentMap.insert d x xs})
 
 newtype M a = M { runM :: Look -> (a -> State -> Simple.Program) -> State -> Simple.Program }
 

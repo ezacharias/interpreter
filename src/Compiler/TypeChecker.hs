@@ -36,8 +36,8 @@ inferProgram (Syntax.Program xs) =
 
 inferDec :: Syntax.Dec -> Either String Syntax.Dec
 
-inferDec (Syntax.SumDec pos s ss rs) =
-  Right $ Syntax.SumDec pos s ss rs
+inferDec (Syntax.SumDec pos q s ss rs) =
+  Right $ Syntax.SumDec pos q s ss rs
 
 -- ty0s and ty0 have been converted in Meta.
 inferDec (Syntax.FunDec pos ty0s ty0 s ss ps ty t) = do

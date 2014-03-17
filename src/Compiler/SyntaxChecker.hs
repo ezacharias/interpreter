@@ -55,7 +55,7 @@ checkDec r (NewDec _ _ s q ts) = todo
 
 checkDec r (SubDec _ _ _ s q) = todo
 
-checkDec r (SumDec _ s ts ds) = todo
+checkDec r (SumDec _ _ s ts ds) = todo
 
 -- We need to grab the inner environment. It should already have the lower type
 -- bindings added.
