@@ -5,12 +5,16 @@ import qualified Data.IntMap     as IdentMap
 import           Data.Map        (Map)
 import qualified Data.Map        as Map
 import           Data.Maybe      (fromMaybe)
+import Debug.Trace (trace)
 
 -- import Debug.Trace (trace)
 
 import qualified Compiler.Simple as Simple
 import qualified Compiler.Syntax as Syntax
 import qualified Compiler.Type   as Type
+
+tr :: Show a => a -> a
+tr x = trace (show x) x
 
 type IdentMap = IdentMap.IntMap
 
@@ -105,7 +109,7 @@ resolveFields p prog decs ns m =
                 resolveFields p prog decs ns m
 
 resolveField :: Name -> Path -> Syntax.Program -> [Syntax.Dec] -> (Path -> Syntax.Program -> [Syntax.Dec] -> M a)-> M a
-resolveField n p prog decs m = fromMaybe (unreachable "resolveField") (search (hasField p prog n m) decs)
+resolveField n p prog decs m = fromMaybe (unreachable $ "resolveField: " ++ show n) (search (hasField p prog n m) decs)
 
 hasField :: Path -> Syntax.Program -> Name -> (Path -> Syntax.Program -> [Syntax.Dec] -> M a) -> Syntax.Dec -> Maybe (M a)
 hasField q1 prog (Name s1 ty1s) m dec =
@@ -117,9 +121,40 @@ hasField q1 prog (Name s1 ty1s) m dec =
       let Syntax.Program decs = prog
       withTypeVariables (zip vs ty1s) $ do
         ns <- mapM groundName ns
+        let p = Path ns
+        withRename (createRename p q1) $ do
+          (ns, n) <- return $ splitPath p
+          resolveFields p prog decs ns $ \ p prog decs -> do
+            resolveUnit n p prog decs m
+    _ -> Nothing
+
+resolveUnit :: Name -> Path -> Syntax.Program -> [Syntax.Dec] -> (Path -> Syntax.Program -> [Syntax.Dec] -> M a)-> M a
+resolveUnit n p prog decs m = fromMaybe (unreachable $ "resolveUnit: " ++ show n) (search (hasUnit p prog n m) decs)
+
+hasUnit :: Path -> Syntax.Program -> Name -> (Path -> Syntax.Program -> [Syntax.Dec] -> M a) -> Syntax.Dec -> Maybe (M a)
+hasUnit p prog (Name s1 ty1s) m dec =
+  case dec of
+    Syntax.UnitDec _ s2 vs decs | s1 == s2 -> Just $ 
+      withTypeVariables (zip vs ty1s) $ 
+        m p prog decs
+    _ -> Nothing
+{-
+      p <- groundPath p
+      let (ns, n) = splitPath p
+      let Syntax.Program decs = prog
+      withTypeVariables (zip vs ty1s) $ do
+        ns <- mapM groundName ns
         withRename (createRename (Path ns) q1) $
           resolveFields (Path ns) prog decs ns m
-    _ -> Nothing
+-}
+
+{-
+      let Syntax.Program decs = prog
+      withTypeVariables (zip vs ty1s) $ do
+        ns <- mapM groundName ns
+        withRename (createRename (Path ns) q1) $
+          resolveFields (Path ns) prog decs ns m
+-}
 
 exportFunWithName :: Simple.Ident -> Name -> [Syntax.Dec] -> M ()
 exportFunWithName d n decs =

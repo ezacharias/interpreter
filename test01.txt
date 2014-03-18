@@ -2,7 +2,9 @@ The minimial program.
 
 
     Main : Output
-      Write(Identity.Identity(Bool.ToString(True)))(Continue(Constant(Exit)))
+      Write(M.Identity(Bool.ToString(True)))(Continue(Constant(Exit)))
+
+    new M = U
 
 
 Booleans
@@ -24,7 +26,7 @@ Utility Functions
     Constant⟦a, b⟧(x : a)(y : b) : a
       x
 
-    mod Identity⟦a⟧
+    unit U
 
-      Identity(x : a) : a
+      Identity⟦a⟧(x : a) : a
         x

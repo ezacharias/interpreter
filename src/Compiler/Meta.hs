@@ -29,6 +29,13 @@ updateProgram (Syntax.Program ds) = do
   ds <- mapM updateDec ds
   return $ Syntax.Program ds
 
+getUnitPath :: M Type.Path
+getUnitPath = do
+  Env xs <- getEnv
+  case xs of
+    ((Just p, _, _, _) : xs) -> return p
+    _ -> unreachable "getUnitPath"
+
 updateDec :: Syntax.Dec -> M Syntax.Dec
 updateDec dec =
   case dec of
@@ -43,8 +50,14 @@ updateDec dec =
       withEnvAddFrame (Nothing, Type.pathAddName q (Type.Name s (map Type.Variable vs)), typeParameters vs, decs) $ do
         decs <- mapM updateDec decs
         return $ Syntax.ModDec pos s vs decs
-    Syntax.NewDec pos _ s vs q -> do
-      todo "updateDec new"
+    Syntax.NewDec pos _ s vs q2 -> do
+      q1 <- getEnvPath
+      q1 <- return $ Type.pathAddName q1 (Type.Name s (map Type.Variable vs))
+      withEnvAddTypeParameters vs $ do
+        q2' <- convertPath q2
+        inUnit q1 q2' $ do
+          q2'_ <- getUnitPath
+          return $ Syntax.NewDec pos q2' s vs q2
     Syntax.SubDec pos _ s vs q ->
       todo "updateDec sub"
     -- Do we want to add some information here?
@@ -53,8 +66,11 @@ updateDec dec =
       let q' = Type.pathAddName q (Type.Name s (map Type.Variable vs))
       cs <- mapM updateConstructor cs
       return $ Syntax.SumDec pos q' s vs cs
-    Syntax.UnitDec pos s vs ds ->
-      todo "updateDec unit"
+    Syntax.UnitDec pos s vs decs -> do
+      q <- getEnvPath
+      withEnvAddFrame (Nothing, Type.pathAddName q (Type.Name s (map Type.Variable vs)), typeParameters vs, decs) $ do
+        decs <- mapM updateDec decs
+        return $ Syntax.UnitDec pos s vs decs
 
 updateConstructor :: (Syntax.Pos, [Type.Type], String, [Syntax.Type]) -> M (Syntax.Pos, [Type.Type], String, [Syntax.Type])
 updateConstructor (pos, _, s, ty1s) = do
@@ -202,11 +218,27 @@ inModWithName n m = do
           unreachable $ "inModWithName 1: " ++ show n
     (x:xs) ->
       case x of
-        (Nothing, _ , _, decs) ->
+        (_, _ , _, decs) ->
           case search (hasModWithName n m) decs of
             Nothing -> withEnv (Env xs) (inModWithName n m)
             Just m -> m
-        (Just q, _, _, _) -> unreachable "inModWithName 2"
+
+inUnitWithName :: Type.Path -> Type.Name -> M a -> M a
+inUnitWithName p n m = do
+  Env xs <- getEnv
+  case xs of
+    [] ->
+      case n of
+        _ -> unreachable $ "inUnitWithName: " ++ show n
+    (x:xs) ->
+      case x of
+        (_, _, _, decs) ->
+          case search (hasUnitWithName p n m) decs of
+            Nothing -> withEnv (Env xs) (inUnitWithName p n m)
+            Just m -> m
+
+inUnitWithField :: Type.Path -> Type.Name -> M a -> M a
+inUnitWithField p n m = inUnitWithName p n m
 
 inResolveFields :: [Type.Name] -> M a -> M a
 inResolveFields ns m =
@@ -247,11 +279,10 @@ getFunWithName n = do
           unreachable $ "getFunWithName 2: " ++ show n
     (x:xs) ->
       case x of
-        (Nothing, _ , _, decs) ->
+        (_, _ , _, decs) ->
           case search (hasFunWithName n) decs of
             Nothing -> withEnv (Env xs) (getFunWithName n)
             Just m -> m
-        (Just q, _, _, _) -> unreachable "getFunWithName 4"
 
 hasModWithName :: Type.Name -> M a -> Syntax.Dec -> Maybe (M a)
 hasModWithName (Type.Name s1 ty1s) m dec =
@@ -262,7 +293,38 @@ hasModWithName (Type.Name s1 ty1s) m dec =
         [] -> mapM (const gen) vs
         _ -> return ty1s
       withEnvAddFrame (Nothing, Type.pathAddName q (Type.Name s1 ty1s), zip vs ty1s, decs) m
+    Syntax.NewDec _ _ s2 vs q2 | s1 == s2 -> Just $ do
+      ty1s <- case ty1s of
+        [] -> mapM (const gen) vs
+        _ -> return ty1s
+      q1 <- getEnvPath
+      q1 <- return $ Type.pathAddName q1 (Type.Name s2 ty1s)
+      withEnvAddTypeVariables (zip vs ty1s) $ do
+        q2 <- convertPath q2
+        inUnit q1 q2 m
     _ -> Nothing
+
+hasUnitWithName :: Type.Path -> Type.Name -> M a -> Syntax.Dec -> Maybe (M a)
+hasUnitWithName p (Type.Name s1 ty1s) m dec =
+  case dec of
+    Syntax.UnitDec _ s2 vs decs | s1 == s2 -> Just $ do
+      q <- getEnvPath
+      ty1s <- case ty1s of
+        [] -> mapM (const gen) vs
+        _ -> return ty1s
+      withEnvAddFrame (Just (Type.pathAddName q (Type.Name s2 ty1s)), p, zip vs ty1s, decs) m
+    _ -> Nothing
+
+inUnit :: Type.Path -> Type.Path -> M a -> M a
+inUnit p (Type.Path ns) m =
+  case ns of
+    [] -> unreachable "inUnit"
+    [n] -> inUnitWithName p n m
+    (n1:ns) -> do
+      let (n2s, n3) = splitPath (Type.Path ns)
+      inModWithName n1 $
+        inResolveFields n2s $
+          inUnitWithField p n3 m
 
 hasSumWithName :: Type.Name -> Syntax.Dec -> Maybe (M Type.Type)
 hasSumWithName (Type.Name s1 ty1s) dec =
