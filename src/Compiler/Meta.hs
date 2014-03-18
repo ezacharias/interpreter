@@ -14,27 +14,21 @@ tr x = trace (show x) x
 addMetavariables :: Syntax.Program -> Syntax.Program
 addMetavariables p = run (programEnv p) $ updateProgram p
 
--- An environment is a possible old path, the full path, the local type bindings, and the declarations.
--- The old path is the name of the environment without accounting for new, so it is only different for
--- units. We use the old path to identify units which are primitives.
+-- An environment is a direct path, the indirect path, the local type bindings,
+-- and the declarations. The indifect path is the name of the environment
+-- without accounting for new, so it is only different for units. We use the
+-- indirect path to identify units which are primitives.
 data Env = Env [Frame]
            deriving (Show)
-type Frame = (Maybe Type.Path, Type.Path, [(String, Type.Type)], [Syntax.Dec])
+type Frame = (Type.Path, Type.Path, [(String, Type.Type)], [Syntax.Dec])
 
 programEnv :: Syntax.Program -> Env
-programEnv (Syntax.Program ds) = Env [(Nothing, Type.Path [], [], ds)]
+programEnv (Syntax.Program decs) = Env [(Type.Path [], Type.Path [], [], decs)]
 
 updateProgram ::  Syntax.Program -> M Syntax.Program
-updateProgram (Syntax.Program ds) = do
-  ds <- mapM updateDec ds
-  return $ Syntax.Program ds
-
-getUnitPath :: M Type.Path
-getUnitPath = do
-  Env xs <- getEnv
-  case xs of
-    ((Just p, _, _, _) : xs) -> return p
-    _ -> unreachable "getUnitPath"
+updateProgram (Syntax.Program decs) = do
+  decs <- mapM updateDec decs
+  return $ Syntax.Program decs
 
 updateDec :: Syntax.Dec -> M Syntax.Dec
 updateDec dec =
@@ -46,29 +40,41 @@ updateDec dec =
         t <- updateTerm t
         return $ Syntax.FunDec pos tys' ty' s vs ps ty t
     Syntax.ModDec pos s vs decs -> do
-      q <- getEnvPath
-      withEnvAddFrame (Nothing, Type.pathAddName q (Type.Name s (map Type.Variable vs)), typeParameters vs, decs) $ do
+      n  <- return $ Type.Name s (map Type.Variable vs)
+      q1 <- getEnvDirectPath
+      q1 <- return $ Type.pathAddName q1 n
+      q2 <- getEnvIndirectPath
+      q2 <- return $ Type.pathAddName q2 n
+      withEnvAddFrame (q1, q2, typeParameters vs, decs) $ do
         decs <- mapM updateDec decs
         return $ Syntax.ModDec pos s vs decs
-    Syntax.NewDec pos _ s vs q2 -> do
-      q1 <- getEnvPath
-      q1 <- return $ Type.pathAddName q1 (Type.Name s (map Type.Variable vs))
+    Syntax.NewDec pos _ s vs q -> do
       withEnvAddTypeParameters vs $ do
-        q2' <- convertPath q2
-        inUnit q1 q2' $ do
-          q2'_ <- getUnitPath
-          return $ Syntax.NewDec pos q2' s vs q2
+        q' <- convertPath q
+        case q' of
+          Type.Path [] -> unreachable "updateDec"
+          Type.Path (n:ns) -> do
+            inModWithName n $ do
+              Type.Path q' <- getEnvIndirectPath
+              return $ Syntax.NewDec pos (Type.Path (q' ++ ns)) s vs q
     Syntax.SubDec pos _ s vs q ->
-      todo "updateDec sub"
-    -- Do we want to add some information here?
+      withEnvAddTypeParameters vs $ do
+        q' <- convertPath q
+        inMod q' $ do
+          q' <- getEnvIndirectPath
+          return $ Syntax.SubDec pos q' s vs q
     Syntax.SumDec pos _ s vs cs -> do
-      q <- getEnvPath
+      q <- getEnvIndirectPath
       let q' = Type.pathAddName q (Type.Name s (map Type.Variable vs))
       cs <- mapM updateConstructor cs
       return $ Syntax.SumDec pos q' s vs cs
     Syntax.UnitDec pos s vs decs -> do
-      q <- getEnvPath
-      withEnvAddFrame (Nothing, Type.pathAddName q (Type.Name s (map Type.Variable vs)), typeParameters vs, decs) $ do
+      n  <- return $ Type.Name s (map Type.Variable vs)
+      q1 <- getEnvDirectPath
+      q1 <- return $ Type.pathAddName q1 n
+      q2 <- getEnvIndirectPath
+      q2 <- return $ Type.pathAddName q2 n
+      withEnvAddFrame (q1, q2, typeParameters vs, decs) $ do
         decs <- mapM updateDec decs
         return $ Syntax.UnitDec pos s vs decs
 
@@ -78,18 +84,6 @@ updateConstructor (pos, _, s, ty1s) = do
   return (pos, ty2s, s, ty1s)
 
 updateTerm :: Syntax.Term -> M Syntax.Term
-updateTerm (Syntax.UpperTerm pos _ _ [("Continue", [])]) = return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Continue" []])
-                                                                                         (Type.Arrow (Type.Arrow Type.Unit (Type.Variant (Type.Path [Type.Name "Output" []])))
-                                                                                                     (Type.Variant (Type.Path [Type.Name "Output" []])))
-                                                                                         [("Continue", [])]
-updateTerm (Syntax.UpperTerm pos _ _ [("Exit", [])]) = return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Exit" []])
-                                                                                     (Type.Variant (Type.Path [Type.Name "Output" []]))
-                                                                                     [("Exit", [])]
-updateTerm (Syntax.UpperTerm pos _ _ [("Write", [])]) = return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Write" []])
-                                                                                      (Type.Arrow Type.String
-                                                                                                  (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
-                                                                                                              (Type.Variant (Type.Path [Type.Name "Output" []]))))
-                                                                                      [("Write", [])]
 updateTerm t =
   case t of
     Syntax.ApplyTerm _ t1 t2 -> do
@@ -111,10 +105,25 @@ updateTerm t =
       return $ Syntax.StringTerm pos x
     Syntax.UnitTerm pos ->
       return $ Syntax.UnitTerm pos
-    Syntax.UpperTerm pos _ _ q -> do
-      q' <- convertPath q
-      (q', ty') <- getFun q'
-      return $ Syntax.UpperTerm pos q' ty' q
+    Syntax.UpperTerm pos _ _ q ->
+      case q of
+        [("Continue", [])] -> return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Continue" []])
+                                         (Type.Arrow (Type.Arrow Type.Unit (Type.Variant (Type.Path [Type.Name "Output" []])))
+                                                     (Type.Variant (Type.Path [Type.Name "Output" []])))
+                                         [("Continue", [])]
+        [("Exit", [])] -> return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Exit" []])
+                                     (Type.Variant (Type.Path [Type.Name "Output" []]))
+                                     [("Exit", [])]
+        [("Write", [])] -> return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Write" []])
+                                      (Type.Arrow Type.String
+                                                  (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
+                                                              (Type.Variant (Type.Path [Type.Name "Output" []]))))
+                                      [("Write", [])]
+        _ -> do
+          q' <- convertPath q
+          (q', ty') <- getFun q'
+          -- _ <- trace (show q') (return ())
+          return $ Syntax.UpperTerm pos q' ty' q
     Syntax.VariableTerm pos x ->
       return $ Syntax.VariableTerm pos x
     _ -> todo $ "updateTerm: " ++ show t
@@ -208,6 +217,9 @@ splitPath (Type.Path ns) =
     [] -> unreachable "splitPath"
     (n:ns) -> (reverse ns, n)
 
+inMod :: Type.Path -> M a -> M a
+inMod p m = todo "inMod"
+
 inModWithName :: Type.Name -> M a -> M a
 inModWithName n m = do
   Env xs <- getEnv
@@ -223,22 +235,22 @@ inModWithName n m = do
             Nothing -> withEnv (Env xs) (inModWithName n m)
             Just m -> m
 
-inUnitWithName :: Type.Path -> Type.Name -> M a -> M a
-inUnitWithName p n m = do
+inUnitWithName :: Type.Name -> Type.Path -> M a -> M a
+inUnitWithName n1 q9 m = do
   Env xs <- getEnv
   case xs of
     [] ->
-      case n of
-        _ -> unreachable $ "inUnitWithName: " ++ show n
+      case n1 of
+        _ -> unreachable $ "inUnitWithName: " ++ show n1
     (x:xs) ->
       case x of
         (_, _, _, decs) ->
-          case search (hasUnitWithName p n m) decs of
-            Nothing -> withEnv (Env xs) (inUnitWithName p n m)
+          case search (hasUnitWithName n1 q9 m) decs of
+            Nothing -> withEnv (Env xs) (inUnitWithName n1 q9 m)
             Just m -> m
 
-inUnitWithField :: Type.Path -> Type.Name -> M a -> M a
-inUnitWithField p n m = inUnitWithName p n m
+inUnitWithField :: Type.Name -> Type.Path -> M a -> M a
+inUnitWithField n1 q9 m = inUnitWithName n1 q9 m
 
 inResolveFields :: [Type.Name] -> M a -> M a
 inResolveFields ns m =
@@ -263,11 +275,10 @@ getSumWithName n = do
           unreachable "getSumWithName 2"
     (x:xs) ->
       case x of
-        (Nothing, _ , _, decs) ->
+        (_, _ , _, decs) ->
           case search (hasSumWithName n) decs of
             Nothing -> withEnv (Env xs) (getSumWithName n)
             Just m -> m
-        (Just q, _, _, _) -> unreachable "getSumWithName 4"
 
 getFunWithName :: Type.Name -> M (Type.Path, Type.Type)
 getFunWithName n = do
@@ -288,49 +299,53 @@ hasModWithName :: Type.Name -> M a -> Syntax.Dec -> Maybe (M a)
 hasModWithName (Type.Name s1 ty1s) m dec =
   case dec of
     Syntax.ModDec _ s2 vs decs | s1 == s2 -> Just $ do
-      q <- getEnvPath
+      n  <- return $ Type.Name s1 ty1s
+      q1 <- getEnvDirectPath
+      q1 <- return $ Type.pathAddName q1 n
+      q2 <- getEnvIndirectPath
+      q2 <- return $ Type.pathAddName q2 n
       ty1s <- case ty1s of
         [] -> mapM (const gen) vs
         _ -> return ty1s
-      withEnvAddFrame (Nothing, Type.pathAddName q (Type.Name s1 ty1s), zip vs ty1s, decs) m
+      withEnvAddFrame (q1, q2, zip vs ty1s, decs) m
     Syntax.NewDec _ _ s2 vs q2 | s1 == s2 -> Just $ do
+      q3 <- getEnvDirectPath
       ty1s <- case ty1s of
         [] -> mapM (const gen) vs
         _ -> return ty1s
-      q1 <- getEnvPath
-      q1 <- return $ Type.pathAddName q1 (Type.Name s2 ty1s)
       withEnvAddTypeVariables (zip vs ty1s) $ do
         q2 <- convertPath q2
-        inUnit q1 q2 m
+        inUnit q2 (Type.pathAddName q3 (Type.Name s1 ty1s)) m
     _ -> Nothing
 
-hasUnitWithName :: Type.Path -> Type.Name -> M a -> Syntax.Dec -> Maybe (M a)
-hasUnitWithName p (Type.Name s1 ty1s) m dec =
+hasUnitWithName :: Type.Name -> Type.Path -> M a -> Syntax.Dec -> Maybe (M a)
+hasUnitWithName (Type.Name s1 ty1s) q9 m dec =
   case dec of
     Syntax.UnitDec _ s2 vs decs | s1 == s2 -> Just $ do
-      q <- getEnvPath
+      q1 <- getEnvDirectPath
       ty1s <- case ty1s of
         [] -> mapM (const gen) vs
         _ -> return ty1s
-      withEnvAddFrame (Just (Type.pathAddName q (Type.Name s2 ty1s)), p, zip vs ty1s, decs) m
+      withEnvAddFrame (Type.pathAddName q1 (todo "hasUnitWithName"), q9, zip vs ty1s, decs) m
     _ -> Nothing
 
+-- The second path is used to give a name to the new instance.
 inUnit :: Type.Path -> Type.Path -> M a -> M a
-inUnit p (Type.Path ns) m =
+inUnit (Type.Path ns) q9 m =
   case ns of
     [] -> unreachable "inUnit"
-    [n] -> inUnitWithName p n m
+    [n1] -> inUnitWithName n1 q9 m
     (n1:ns) -> do
       let (n2s, n3) = splitPath (Type.Path ns)
       inModWithName n1 $
         inResolveFields n2s $
-          inUnitWithField p n3 m
+          inUnitWithField n3 q9 m
 
 hasSumWithName :: Type.Name -> Syntax.Dec -> Maybe (M Type.Type)
 hasSumWithName (Type.Name s1 ty1s) dec =
   case dec of
     Syntax.SumDec _ _ s2 _ _ | s1 == s2 -> Just $ do
-      q <- getEnvPath
+      q <- getEnvIndirectPath
       return $ Type.Variant (Type.pathAddName q (Type.Name s1 ty1s))
     _ -> Nothing
 
@@ -339,7 +354,7 @@ hasFunWithName (Type.Name s1 ty1s) dec =
   case dec of
     Syntax.SumDec _ _ s2 vs cs ->
       let has (_, _, s3, ty2s) | s1 == s3 = Just $ do
-            q <- getEnvPath
+            q <- getEnvIndirectPath
             ty1s <- case ty1s of
               [] -> mapM (const gen) vs
               _ -> return ty1s
@@ -351,7 +366,7 @@ hasFunWithName (Type.Name s1 ty1s) dec =
           has _ = Nothing
        in search has cs
     Syntax.FunDec _ _ _ s2 vs pats ty _ | s1 == s2 -> Just $ do
-      q <- getEnvPath
+      q <- getEnvIndirectPath
       ty1s <- case ty1s of
         [] -> mapM (const gen) vs
         _ -> return ty1s
@@ -457,11 +472,18 @@ lookupTypeVariable s = do
   return $ fromMaybe (unreachable $ "lookupTypeVariable: " ++ s) (search has r)
   where has (_, _, xs, _) = lookup s xs
 
-getEnvPath :: M Type.Path
-getEnvPath = do
+getEnvDirectPath :: M Type.Path
+getEnvDirectPath = do
   Env r <- getEnv
   case r of
-    [] -> unreachable "getEnvPath"
+    [] -> unreachable "getEnvDirectPath"
+    ((q, _, _, _) : _) -> return q
+
+getEnvIndirectPath :: M Type.Path
+getEnvIndirectPath = do
+  Env r <- getEnv
+  case r of
+    [] -> unreachable "getEnvIndirectPath"
     ((_, q, _, _) : _) -> return q
 
 withEnvAddFrame :: Frame -> M a -> M a
@@ -475,8 +497,9 @@ withEnvAddTypeParameters vs m = do
 
 withEnvAddTypeVariables :: [(String, Type.Type)] -> M a -> M a
 withEnvAddTypeVariables xs m = do
-  q <- getEnvPath
-  withEnvAddFrame (Nothing, q, xs, []) m
+  q1 <- getEnvDirectPath
+  q2 <- getEnvIndirectPath
+  withEnvAddFrame (q1, q2, xs, []) m
 
 typeParameters :: [String] -> [(String, Type.Type)]
 typeParameters vs = map (\ v -> (v, Type.Variable v)) vs
