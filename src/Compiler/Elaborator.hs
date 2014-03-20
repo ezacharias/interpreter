@@ -75,6 +75,16 @@ getSum q = do
           addWork $ exportSum q d
           return d
 
+getTag :: Path -> M Simple.Ident
+getTag q = do
+  x <- get exportedTags
+  case Map.lookup q x of
+    Just d -> return d
+    Nothing -> do
+      d <- gen
+      set (\ s -> s {exportedTags = Map.insert q d x})
+      return d
+
 -- If we use a constructor as a function or in a pattern we must make sure the
 -- sum type is exported.
 exportFun :: Path -> Simple.Ident -> Syntax.Program -> M ()
@@ -86,7 +96,7 @@ exportFun p d prog = do
   let (ns, n) = splitPath p
   let (Syntax.Program decs) = prog
   resolveFields (Path []) prog decs ns $ \ p prog decs ->
-    exportFunWithName d n decs
+    exportFunWithName p d n decs
 
 exportSum :: Path -> Simple.Ident -> Syntax.Program -> M ()
 exportSum p d prog = do
@@ -121,19 +131,26 @@ hasField p prog (Name s1 ty1s) m dec =
       withTypeVariables (zip vs ty1s) $ do
         m p prog decs
     Syntax.NewDec _ (Type.Path ns) s2 vs _ | s1 == s2 -> Just $ do
-      let Syntax.Program decs = prog
-      withTypeVariables (zip vs ty1s) $ do
-        ns <- mapM groundName ns
-        p2 <- return $ Path ns
-        -- _ <- trace ("3 " ++ show p2) (return ())
-        -- _ <- trace ("4 " ++ show p) (return ())
-        withRename (createRename p2 p) $ do
-          {-
-          (ns, n) <- return $ splitPath p2
-          resolveFields (Path []) prog decs ns $ \ p prog decs -> do
-            resolveUnit n p prog decs m
-          -}
-          resolveFields (Path []) prog decs ns m
+      case ns of
+        [Type.Name "Escape" [ty1, ty2]] -> do
+          ty1 <- groundType ty1
+          ty2 <- groundType ty2
+          withTypeVariables [("a", ty1), ("b", ty2)] $ do
+            m p prog []
+        _ -> do
+          let Syntax.Program decs = prog
+          withTypeVariables (zip vs ty1s) $ do
+            ns <- mapM groundName ns
+            p2 <- return $ Path ns
+            -- _ <- trace ("3 " ++ show p2) (return ())
+            -- _ <- trace ("4 " ++ show p) (return ())
+            withRename (createRename p2 p) $ do
+              {-
+              (ns, n) <- return $ splitPath p2
+              resolveFields (Path []) prog decs ns $ \ p prog decs -> do
+                resolveUnit n p prog decs m
+              -}
+              resolveFields (Path []) prog decs ns m
     Syntax.UnitDec _ s2 vs decs | s1 == s2 -> Just $ do
       withTypeVariables (zip vs ty1s) $ do
         m p prog decs
@@ -168,9 +185,17 @@ hasUnit p prog (Name s1 ty1s) m dec =
 -}
 -}
 
-exportFunWithName :: Simple.Ident -> Name -> [Syntax.Dec] -> M ()
-exportFunWithName d n decs =
-  fromMaybe (unreachable $ "exportFunWithName: " ++ show n) (search (hasFunWithName d n) decs)
+exportFunWithName :: Path -> Simple.Ident -> Name -> [Syntax.Dec] -> M ()
+exportFunWithName p d n decs =
+  case n of
+    Name "Catch" [ty] -> do
+      d2 <- getTag p
+      primitiveCatch d2 d ty
+    Name "Throw" [] -> do
+      d2 <- getTag p
+      primitiveThrow d2 d
+    _ ->
+      fromMaybe (unreachable $ "exportFunWithName: " ++ show n) (search (hasFunWithName d n) decs)
 
 exportSumWithName :: Simple.Ident -> Name -> [Syntax.Dec] -> M ()
 exportSumWithName d n decs =
@@ -240,6 +265,43 @@ primitiveUnreachable ty d = do
   ty <- elaborateType ty
   addFun d $ Simple.Fun ty (Simple.UnreachableTerm ty)
 
+primitiveThrow :: Int -> Int -> M ()
+primitiveThrow d2 d = do
+  d3 <- gen
+  ty1 <- getTypeVariable "a"
+  ty1 <- elaborateType ty1
+  ty2 <- getTypeVariable "b"
+  ty2 <- elaborateType ty2
+  addFun d $ Simple.Fun (Simple.ArrowType ty1 ty2)
+               (Simple.LambdaTerm d3 ty1
+                 (Simple.ThrowTerm d2 (Simple.VariableTerm d3)))
+
+primitiveCatch :: Int -> Int -> Type -> M ()
+primitiveCatch tag d ty3 = do
+  d2 <- gen
+  d3 <- gen
+  d4 <- gen
+  d5 <- gen
+  ty1 <- getTypeVariable "a"
+  ty1 <- elaborateType ty1
+  ty2 <- getTypeVariable "b"
+  ty2 <- elaborateType ty2
+  ty3 <- elaborateType ty3
+  addFun d $ Simple.Fun (Simple.ArrowType (Simple.ArrowType Simple.UnitType ty3)
+                                          (Simple.ArrowType (Simple.ArrowType ty1
+                                                                              (Simple.ArrowType (Simple.ArrowType ty2 ty3)
+                                                                                                ty3))
+                                                            ty3))
+                      (Simple.LambdaTerm d2 (Simple.ArrowType Simple.UnitType ty3)
+                        (Simple.LambdaTerm d3 (Simple.ArrowType ty1
+                                                                (Simple.ArrowType (Simple.ArrowType ty2 ty3)
+                                                                                  ty3))
+                          (Simple.CatchTerm tag
+                            (Simple.ApplyTerm (Simple.VariableTerm d2) Simple.UnitTerm)
+                            d4 d5
+                            (Simple.ApplyTerm (Simple.ApplyTerm (Simple.VariableTerm d3)
+                                                                (Simple.VariableTerm d4))
+                                              (Simple.VariableTerm d5)))))
 
 elaborateType :: Type -> M Simple.Type
 elaborateType ty = do

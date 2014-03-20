@@ -111,18 +111,21 @@ updateTerm t =
       return $ Syntax.UnitTerm pos
     Syntax.UpperTerm pos _ _ q ->
       case q of
-        [("Continue", [])] -> return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Continue" []])
-                                         (Type.Arrow (Type.Arrow Type.Unit (Type.Variant (Type.Path [Type.Name "Output" []])))
-                                                     (Type.Variant (Type.Path [Type.Name "Output" []])))
-                                         [("Continue", [])]
-        [("Exit", [])] -> return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Exit" []])
-                                     (Type.Variant (Type.Path [Type.Name "Output" []]))
-                                     [("Exit", [])]
-        [("Write", [])] -> return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Write" []])
-                                      (Type.Arrow Type.String
-                                                  (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
-                                                              (Type.Variant (Type.Path [Type.Name "Output" []]))))
-                                      [("Write", [])]
+        [("Continue", [])] ->
+          return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Continue" []])
+                     (Type.Arrow (Type.Arrow Type.Unit (Type.Variant (Type.Path [Type.Name "Output" []])))
+                                 (Type.Variant (Type.Path [Type.Name "Output" []])))
+                     [("Continue", [])]
+        [("Exit", [])] ->
+          return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Exit" []])
+                     (Type.Variant (Type.Path [Type.Name "Output" []]))
+                     [("Exit", [])]
+        [("Write", [])] ->
+          return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Write" []])
+                     (Type.Arrow Type.String
+                                 (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
+                                             (Type.Variant (Type.Path [Type.Name "Output" []]))))
+                     [("Write", [])]
         [("Unreachable", tys)] -> do
           ty' <- case tys of
             [] -> gen
@@ -256,6 +259,8 @@ inUnitWithName n1 q9 m = do
   case xs of
     [] ->
       case n1 of
+        Type.Name "Escape" [ty1, ty2] -> do
+          withEnvAddFrame (Type.Path [Type.Name "Escape" [ty1, ty2]], q9, [], []) m
         _ -> unreachable $ "inUnitWithName: " ++ show n1
     (x:xs) ->
       case x of
@@ -270,6 +275,8 @@ inUnitWithName2 n1 m = do
   case xs of
     [] ->
       case n1 of
+        Type.Name "Escape" [ty1, ty2] -> do
+          withEnvAddFrame (Type.Path [Type.Name "Escape" [ty1, ty2]], Type.Path [Type.Name "Escape" [ty1, ty2]], [], []) m
         _ -> unreachable $ "inUnitWithName2: " ++ show n1
     (x:xs) ->
       case x of
@@ -319,6 +326,22 @@ getFunWithName n = do
           unreachable $ "getFunWithName 2: " ++ show n
     (x:xs) ->
       case x of
+        (Type.Path [Type.Name "Escape" [ty1, ty2]], q, _, _) ->
+          case n of
+            Type.Name "Throw" [] -> do
+              return (Type.pathAddName q n, Type.Arrow ty1 ty2)
+            Type.Name "Catch" tys -> do
+              ty3 <- case tys of
+                [ty3] -> return ty3
+                _ -> gen
+              return (Type.pathAddName q (Type.Name "Catch" [ty3]),
+                      Type.Arrow (Type.Arrow Type.Unit ty3)
+                                 (Type.Arrow (Type.Arrow ty1
+                                                         (Type.Arrow (Type.Arrow ty2
+                                                                                 ty3)
+                                                                     ty3))
+                                             ty3))
+            _ -> unreachable "getFunWithName Escape"
         (_, _ , _, decs) ->
           case search (hasFunWithName n) decs of
             Nothing -> withEnv (Env xs) (getFunWithName n)

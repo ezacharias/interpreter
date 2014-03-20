@@ -2,10 +2,21 @@ The minimial program.
 
 
     Main : Output
-      Write("Hello")(Continue(Constant(Exit)))
+      E.Catch(F)(G)
+ --   Write("Hello")(Continue(Constant(Exit)))
+
+    F() : Output
+      E.Throw("Hello")
+      Exit
+
+    G(x : String)(k : () ⟶ Output) : Output
+      Write(x)(Exit)
 
     Constant⟦a, b⟧(x : a)(_ : b) : a
       x
+
+    new E = Escape⟦String, ()⟧
+ -- new J⟦a, b⟧ = Escape⟦a, b⟧
 
     mod JA
       unit U
