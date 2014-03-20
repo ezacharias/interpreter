@@ -2,17 +2,20 @@ The minimial program.
 
 
     Main : Output
-      Q.N.M.JC.F(Exit)
+      Write("Hello")(Continue(Constant(Exit)))
+
+    Constant⟦a, b⟧(x : a)(_ : b) : a
+      x
 
     mod JA
       unit U
         mod JB
           unit V
             mod JC
-              F⟦a⟧(x : a) : a
-                G(x)
-            G⟦a⟧(x : a) : a
-              x
+              G⟦a⟧(x : a) : a
+                x
         new M = JB.V
+        F⟦a⟧(x : a) : a
+          M.JC.G(x)
     mod Q
       new N = JA.U

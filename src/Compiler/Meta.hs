@@ -123,6 +123,14 @@ updateTerm t =
                                                   (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
                                                               (Type.Variant (Type.Path [Type.Name "Output" []]))))
                                       [("Write", [])]
+        [("Unreachable", tys)] -> do
+          ty' <- case tys of
+            [] -> gen
+            [ty] -> convertType ty
+            _ -> unreachable "updateTerm"
+          return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Unreachable" [ty']])
+                     ty'
+                     [("Unreachable", tys)]
         _ -> do
           -- _ <- trace ("3 " ++ show q) (return ())
           q' <- convertPath q
