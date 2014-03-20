@@ -2,6 +2,7 @@ module Compiler.Syntax where
 
 import qualified Compiler.Type as Type
 
+
 data Program = Program [Dec]
                deriving (Eq, Show)
 

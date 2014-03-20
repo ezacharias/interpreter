@@ -125,12 +125,21 @@ hasField p prog (Name s1 ty1s) m dec =
       withTypeVariables (zip vs ty1s) $ do
         ns <- mapM groundName ns
         p2 <- return $ Path ns
+        -- _ <- trace ("3 " ++ show p2) (return ())
+        -- _ <- trace ("4 " ++ show p) (return ())
         withRename (createRename p2 p) $ do
+          {-
           (ns, n) <- return $ splitPath p2
-          resolveFields p2 prog decs ns $ \ p prog decs -> do
+          resolveFields (Path []) prog decs ns $ \ p prog decs -> do
             resolveUnit n p prog decs m
+          -}
+          resolveFields (Path []) prog decs ns m
+    Syntax.UnitDec _ s2 vs decs | s1 == s2 -> Just $ do
+      withTypeVariables (zip vs ty1s) $ do
+        m p prog decs
     _ -> Nothing
 
+{-
 resolveUnit :: Name -> Path -> Syntax.Program -> [Syntax.Dec] -> (Path -> Syntax.Program -> [Syntax.Dec] -> M a)-> M a
 resolveUnit n p prog decs m = fromMaybe (unreachable $ "resolveUnit: " ++ show n) (search (hasUnit p prog n m) decs)
 
@@ -150,13 +159,13 @@ hasUnit p prog (Name s1 ty1s) m dec =
         withRename (createRename (Path ns) q1) $
           resolveFields (Path ns) prog decs ns m
 -}
-
 {-
       let Syntax.Program decs = prog
       withTypeVariables (zip vs ty1s) $ do
         ns <- mapM groundName ns
         withRename (createRename (Path ns) q1) $
           resolveFields (Path ns) prog decs ns m
+-}
 -}
 
 exportFunWithName :: Simple.Ident -> Name -> [Syntax.Dec] -> M ()
@@ -322,7 +331,9 @@ elaborateTerm t =
     Syntax.UnitTerm pos ->
       return $ Simple.UnitTerm
     Syntax.UpperTerm _ q _ _ -> do
+      -- _ <- trace ("1: " ++ show q) (return ())
       q <- groundPath q
+      -- _ <- trace ("2: " ++ show q) (return ())
       d <- getFun q
       return $ Simple.FunTerm d
     Syntax.VariableTerm _ s -> do
@@ -412,6 +423,7 @@ with f m = M (\ o k d -> runM m (f o) k d)
 
 withRename :: (Path -> Path) -> M a -> M a
 withRename f m = with (\ o -> o {renamer = renamer o . f}) m
+-- withRename f m = with (\ o -> o {renamer = f}) m
 
 withTypeVariables :: [(String, Type)] -> M a -> M a
 withTypeVariables xs m = with (\ o -> o {typeVariables = xs ++ typeVariables o}) m

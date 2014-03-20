@@ -1,6 +1,3 @@
-{- OPTIONS_GHC -fno-warn-missing-signatures -}
-{- LANGUAGE TemplateHaskell -}
-
 module Main where
 
 -- import           Control.Exception.Base
@@ -9,22 +6,43 @@ import           Test.Framework
 import           Test.Framework.Providers.HUnit
 import           Test.HUnit.Base                hiding (Test)
 
-import qualified Compiler.ElaboratorOld            as Elaborator
+import qualified Compiler.Elaborator            as Elaborator
 -- import qualified Compiler.Lambda                as Lambda
-import qualified Compiler.Syntax                as Syntax
+-- import qualified Compiler.Syntax                as Syntax
 
 main :: IO ()
 main = defaultMain tests
 
 tests :: [Test]
 tests =
- [ testCase "empty program names" $
-     let v' = Elaborator.runM m k rs v 0
-         v = Elaborator.emptyEnv
-         rs = [Elaborator.emptyRename]
-         k () v _ = v
-         m = Elaborator.convertDec (Syntax.ModDec undefined "M" [])
-      in v' @?= Elaborator.Env [] [] [] []
+ [ testCase "renamer 1" $
+     let f = Elaborator.createRename
+         p1 = Elaborator.Path [Elaborator.Name "A" []]
+         p2 = Elaborator.Path [Elaborator.Name "B" []]
+         p3 = Elaborator.Path [Elaborator.Name "C" []]
+         p0 = Elaborator.Path [Elaborator.Name "C" []]
+      in p0 @?= f p1 p2 p3
+ , testCase "renamer 2" $
+     let f = Elaborator.createRename
+         p1 = Elaborator.Path [Elaborator.Name "A" []]
+         p2 = Elaborator.Path [Elaborator.Name "B" []]
+         p3 = Elaborator.Path [Elaborator.Name "A" []]
+         p0 = Elaborator.Path [Elaborator.Name "B" []]
+      in p0 @?= f p1 p2 p3
+ , testCase "renamer 3" $
+     let f = Elaborator.createRename
+         p1 = Elaborator.Path [Elaborator.Name "A" []]
+         p2 = Elaborator.Path [Elaborator.Name "B1" [], Elaborator.Name "B2" []]
+         p3 = Elaborator.Path [Elaborator.Name "A" []]
+         p0 = Elaborator.Path [Elaborator.Name "B1" [], Elaborator.Name "B2" []]
+      in p0 @?= f p1 p2 p3
+ , testCase "renamer 4" $
+     let f = Elaborator.createRename
+         p1 = Elaborator.Path [Elaborator.Name "A1" []]
+         p2 = Elaborator.Path [Elaborator.Name "B1" [], Elaborator.Name "B2" []]
+         p3 = Elaborator.Path [Elaborator.Name "A1" [], Elaborator.Name "A2" []]
+         p0 = Elaborator.Path [Elaborator.Name "B1" [], Elaborator.Name "B2" [], Elaborator.Name "A2" []]
+      in p0 @?= f p1 p2 p3
 {-
  , testCase "single tag" $
      let v' = Elaborator.runM m k rs v 0

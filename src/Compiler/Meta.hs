@@ -53,6 +53,10 @@ updateDec dec =
         q' <- convertPath q
         case q' of
           Type.Path [] -> unreachable "updateDec"
+          Type.Path [n] ->
+            inUnitWithName2 n $ do
+              q' <- getEnvIndirectPath
+              return $ Syntax.NewDec pos q' s vs q
           Type.Path (n:ns) -> do
             inModWithName n $ do
               Type.Path q' <- getEnvIndirectPath
@@ -120,8 +124,11 @@ updateTerm t =
                                                               (Type.Variant (Type.Path [Type.Name "Output" []]))))
                                       [("Write", [])]
         _ -> do
+          -- _ <- trace ("3 " ++ show q) (return ())
           q' <- convertPath q
+          -- _ <- trace ("4 " ++ show q') (return ())
           (q', ty') <- getFun q'
+          -- _ <- trace ("5 " ++ show q') (return ())
           -- _ <- trace (show q') (return ())
           return $ Syntax.UpperTerm pos q' ty' q
     Syntax.VariableTerm pos x ->
@@ -249,6 +256,20 @@ inUnitWithName n1 q9 m = do
             Nothing -> withEnv (Env xs) (inUnitWithName n1 q9 m)
             Just m -> m
 
+inUnitWithName2 :: Type.Name -> M a -> M a
+inUnitWithName2 n1 m = do
+  Env xs <- getEnv
+  case xs of
+    [] ->
+      case n1 of
+        _ -> unreachable $ "inUnitWithName2: " ++ show n1
+    (x:xs) ->
+      case x of
+        (_, _, _, decs) ->
+          case search (hasUnitWithName2 n1 m) decs of
+            Nothing -> withEnv (Env xs) (inUnitWithName2 n1 m)
+            Just m -> m
+
 inUnitWithField :: Type.Name -> Type.Path -> M a -> M a
 inUnitWithField n1 q9 m = inUnitWithName n1 q9 m
 
@@ -309,7 +330,7 @@ hasModWithName (Type.Name s1 ty1s) m dec =
         _ -> return ty1s
       withEnvAddFrame (q1, q2, zip vs ty1s, decs) m
     Syntax.NewDec _ _ s2 vs q2 | s1 == s2 -> Just $ do
-      q3 <- getEnvDirectPath
+      q3 <- getEnvIndirectPath
       ty1s <- case ty1s of
         [] -> mapM (const gen) vs
         _ -> return ty1s
@@ -326,8 +347,24 @@ hasUnitWithName (Type.Name s1 ty1s) q9 m dec =
       ty1s <- case ty1s of
         [] -> mapM (const gen) vs
         _ -> return ty1s
-      withEnvAddFrame (Type.pathAddName q1 (todo "hasUnitWithName"), q9, zip vs ty1s, decs) m
+      withEnvAddFrame (Type.pathAddName q1 (Type.Name s1 ty1s), q9, zip vs ty1s, decs) m
     _ -> Nothing
+
+hasUnitWithName2 :: Type.Name -> M a -> Syntax.Dec -> Maybe (M a)
+hasUnitWithName2 (Type.Name s1 ty1s) m dec =
+  case dec of
+    Syntax.UnitDec _ s2 vs decs | s1 == s2 -> Just $ do
+      ty1s <- case ty1s of
+        [] -> mapM (const gen) vs
+        _ -> return ty1s
+      n  <- return $ Type.Name s1 ty1s
+      q1 <- getEnvDirectPath
+      q1 <- return $ Type.pathAddName q1 n
+      q2 <- getEnvIndirectPath
+      q2 <- return $ Type.pathAddName q2 n
+      withEnvAddFrame (q1, q2, zip vs ty1s, decs) m
+    _ -> Nothing
+
 
 -- The second path is used to give a name to the new instance.
 inUnit :: Type.Path -> Type.Path -> M a -> M a
@@ -367,6 +404,7 @@ hasFunWithName (Type.Name s1 ty1s) dec =
        in search has cs
     Syntax.FunDec _ _ _ s2 vs pats ty _ | s1 == s2 -> Just $ do
       q <- getEnvIndirectPath
+      -- _ <- trace ("6 " ++ show q) (return ())
       ty1s <- case ty1s of
         [] -> mapM (const gen) vs
         _ -> return ty1s

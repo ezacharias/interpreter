@@ -2,39 +2,17 @@ The minimial program.
 
 
     Main : Output
-      Write(M.G.Identity(Bool.ToString(True)))(Continue(Constant(Exit)))
+      Q.N.M.JC.F(Exit)
 
-    new M = K.U
-
-
-Booleans
-
-
-    sum Bool
-      False
-      True
-
-    mod Bool
-
-      ToString(x : Bool) : String
-        "True"
-
-
-Utility Functions
-
-
-    Constant⟦a, b⟧(x : a)(y : b) : a
-      x
-
-    mod K
-
+    mod JA
       unit U
-
-        mod G
-
-          Identity⟦a⟧(x : a) : a
-            Id(x)
-
-          Id⟦a⟧(x : a) : a
-            x
-
+        mod JB
+          unit V
+            mod JC
+              F⟦a⟧(x : a) : a
+                G(x)
+            G⟦a⟧(x : a) : a
+              x
+        new M = JB.V
+    mod Q
+      new N = JA.U
