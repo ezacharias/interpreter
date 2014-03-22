@@ -54,11 +54,11 @@ data Pat = AscribePat Pos Type.Type Pat Type
            deriving (Eq, Show)
 
 data Type = ArrowType Type Type
-         | LowerType String
-         | TupleType [Type]
-         | UnitType Pos
-         | UpperType Pos Path
-           deriving (Eq, Show)
+          | LowerType String
+          | TupleType [Type]
+          | UnitType Pos
+          | UpperType Pos Path
+            deriving (Eq, Show)
 
 -- | Position filename line col.
 
