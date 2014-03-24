@@ -180,7 +180,7 @@ convertType ty = do
       ty1 <- convertType ty1
       ty2 <- convertType ty2
       return $ Type.Arrow ty1 ty2
-    Syntax.LowerType x ->
+    Syntax.LowerType _ x ->
       lookupTypeVariable x
     Syntax.TupleType tys -> do
       tys <- mapM convertType tys

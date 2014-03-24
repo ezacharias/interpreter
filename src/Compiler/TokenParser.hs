@@ -467,7 +467,10 @@ typ2 = do
          ]
 
 lowerTyp :: AmbiguousParser Syntax.Type
-lowerTyp = liftM Syntax.LowerType lower
+lowerTyp = do
+  pos <- position
+  x <- lower
+  return $ Syntax.LowerType pos x
 
 
 tupleTyp :: AmbiguousParser Syntax.Type

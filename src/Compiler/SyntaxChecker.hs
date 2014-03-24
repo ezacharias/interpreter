@@ -1,15 +1,20 @@
--- Do we check that lower-case variable are bound even though the parser does this?
+-- Unbound value variables are detected by the parser.
+--
+-- Substitions only work for modules and not units because it doesn't really
+-- matter how long a path to a unit is and you can always substituto to the
+-- parent module.
+
+-- Think about whether we must do an arity check for paths. We must check for
+-- all paths except paths to functions in a function body.
+
 -- Do we check that constructors in bindings are singleton types?
 -- Should we check constructor arity in the type checker?
--- Should we allow substitutions of units?
--- Should we check type variable shadowing in parser?
--- What else should we check in the parser?
 -- How should we check completeness of case terms?
 -- Make sure substitutions work properly when looking up declarations.
 
 module Compiler.SyntaxChecker where
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, when, unless)
 import Data.Either ()
 
 import qualified Compiler.Type as Type
@@ -30,39 +35,45 @@ checkDec dec =
     Syntax.FunDec pos _ _ s1 vs ps ty t -> do
       checkIfFunctionNameIsAlreadyUsed pos s1
       checkIfTypeVariablesAreUsedMoreThanOnce pos vs
-      -- checkIfTypeVariablesShadow vs
-      checkPats ps
-      checkType ty
-      checkTerm t
+      checkIfTypeVariablesShadow pos vs
+      withTypeVariables vs $ do
+        checkPats ps
+        checkType ty
+        checkTerm t
     Syntax.ModDec pos s1 vs decs -> do
       checkIfModuleNameIsAlreadyUsed pos s1
       checkIfTypeVariablesAreUsedMoreThanOnce pos vs
-      -- checkIfTypeVariablesShadow vs
-      withDecs decs $
-        mapM_ checkDec decs
+      checkIfTypeVariablesShadow pos vs
+      withTypeVariables vs $
+        withDecs decs $
+          mapM_ checkDec decs
     Syntax.NewDec pos _ s1 vs q -> do
       checkIfModuleNameIsAlreadyUsed pos s1
       checkIfTypeVariablesAreUsedMoreThanOnce pos vs
-      -- checkIfTypeVariablesShadow vs
-      checkIfPathIsValidUnit q
+      checkIfTypeVariablesShadow pos vs
+      withTypeVariables vs $
+        checkIfPathIsValidUnit q
     Syntax.SubDec pos _ s1 vs q -> do
       checkIfModuleNameIsAlreadyUsed pos s1
       checkIfTypeVariablesAreUsedMoreThanOnce pos vs
-      -- checkIfTypeVariablesShadow vs
+      checkIfTypeVariablesShadow pos vs
       checkIfAllTypeVariablesAreFoundInPath pos q vs
-      checkIfPathIsValidModule q
+      withTypeVariables vs $
+        checkIfPathIsValidModule q
     Syntax.SumDec pos _ s1 vs cs -> do
       checkIfTypeNameIsAlreadyUsed pos s1
       checkIfTypeVariablesAreUsedMoreThanOnce pos vs
-      -- checkIfTypeVariablesShadow vs
-      withSomething $
-        mapM_ checkConstructor cs
+      checkIfTypeVariablesShadow pos vs
+      withTypeVariables vs $
+        withSomething $
+          mapM_ checkConstructor cs
     Syntax.UnitDec pos s1 vs decs -> do
       checkIfModuleNameIsAlreadyUsed pos s1
       checkIfTypeVariablesAreUsedMoreThanOnce pos vs
-      -- checkIfTypeVariablesShadow vs
-      withDecs decs $
-        mapM_ checkDec decs
+      checkIfTypeVariablesShadow pos vs
+      withTypeVariables vs $
+        withDecs decs $
+          mapM_ checkDec decs
 
 checkType :: Syntax.Type -> M ()
 checkType ty =
@@ -70,9 +81,10 @@ checkType ty =
     Syntax.ArrowType ty1 ty2 -> do
       checkType ty1
       checkType ty2
-    Syntax.LowerType s ->
-      -- Whether variables are bound is checked by the parser.
-      return ()
+    Syntax.LowerType pos s -> do
+      vs <- look boundTypeVariables
+      unless (elem s vs) $
+        syntaxErrorLine pos $ "Type variable name " ++ s ++ " is unbound."
     Syntax.TupleType tys ->
       mapM_ checkType tys
     Syntax.UnitType pos ->
@@ -179,18 +191,16 @@ checkIfTypeVariablesAreUsedMoreThanOnce pos vs = f vs []
             syntaxErrorLine pos $ "Type variable name " ++ v ++ " used more than once."
           f vs (v:xs)
 
-{-
-checkIfTypeVariablesShadow :: [String] -> M ()
-checkIfTypeVariablesShadow v1s = do
-  v2s <- look typeVariables
+checkIfTypeVariablesShadow :: Syntax.Pos -> [String] -> M ()
+checkIfTypeVariablesShadow pos v1s = do
+  v2s <- look boundTypeVariables
   forM_ v1s $ \ v1 ->
     when (elem v1 v2s) $
-      fail $ "type variable shadows" ++ v1
+      syntaxErrorLine pos $ "Type variable name " ++ v1 ++ " shadows previous type variable."
 
 withTypeVariables :: [String] -> M a -> M a
 withTypeVariables vs m =
-  with (\ l -> l {typeVariables = vs ++ typeVariables l}) m
--}
+  with (\ l -> l {boundTypeVariables = vs ++ boundTypeVariables l}) m
 
 -- For sub declarations every type variable must be found in the path so we can
 -- replace the substitution without losing any information.
@@ -201,7 +211,7 @@ checkIfTypeVariableIsFoundInPath :: Syntax.Pos -> Syntax.Path -> String -> M ()
 checkIfTypeVariableIsFoundInPath pos q v =
   if isTypeVariableFoundInPath v q
     then return ()
-    else syntaxErrorLine pos $ "Type variable " ++ v ++ " is unused."
+    else syntaxErrorLine pos $ "Type variable name " ++ v ++ " is unused."
 
 isTypeVariableFoundInPath :: String -> Syntax.Path -> Bool
 isTypeVariableFoundInPath v q = or (map (isTypeVariableFoundInName v) q)
@@ -213,7 +223,7 @@ isTypeVariableFoundInType :: String -> Syntax.Type -> Bool
 isTypeVariableFoundInType v ty =
   case ty of
     Syntax.ArrowType ty1 ty2 -> or [isTypeVariableFoundInType v ty1, isTypeVariableFoundInType v ty1]
-    Syntax.LowerType s -> v == s
+    Syntax.LowerType _ s -> v == s
     Syntax.TupleType tys -> or (map (isTypeVariableFoundInType v) tys)
     Syntax.UnitType _ -> False
     Syntax.UpperType _ q -> isTypeVariableFoundInPath v q
@@ -305,7 +315,7 @@ checkIfValueVariableIsUsedMultipleTimes :: Syntax.Pos -> String -> M ()
 checkIfValueVariableIsUsedMultipleTimes pos v = do
   vs <- get valueVariables
   when (elem v vs) $
-    syntaxErrorLine pos $ "Variable " ++ v ++ " used more than once in pattern."
+    syntaxErrorLine pos $ "Variable name " ++ v ++ " used more than once in pattern."
   set (\ s -> s {valueVariables = (v:vs)})
 
 withDecs :: [Syntax.Dec] -> M a -> M a
@@ -331,8 +341,8 @@ run m = runM m emptyLook (\ x _ -> Nothing) emptyState
 
 emptyLook :: Look
 emptyLook = Look
-  { -- typeVariables = []
-    envStack = []
+  { envStack = []
+  , boundTypeVariables = []
   }
 
 emptyState :: State
@@ -354,8 +364,8 @@ data State = State
  }
 
 data Look = Look
- { -- typeVariables :: [String]
-   envStack :: [[Syntax.Dec]]
+ { envStack :: [[Syntax.Dec]]
+ , boundTypeVariables :: [String]
  }
 
 instance Monad M where

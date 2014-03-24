@@ -54,7 +54,7 @@ data Pat = AscribePat Pos Type.Type Pat Type
            deriving (Eq, Show)
 
 data Type = ArrowType Type Type
-          | LowerType String
+          | LowerType Pos String
           | TupleType [Type]
           | UnitType Pos
           | UpperType Pos Path
