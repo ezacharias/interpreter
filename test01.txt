@@ -13,6 +13,9 @@ The minimial program.
       Write(x)(Exit)
 
     Constant⟦a, b⟧(x : a)(_ : b) : a
+      Identity⟦a⟧(x)
+
+    Identity⟦a⟧(x : a) : a
       x
 
     new E = Escape⟦String, ()⟧
