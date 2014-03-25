@@ -182,13 +182,15 @@ dotUpper = do
 
 path :: AmbiguousParser Syntax.Path
 path = do
+  pos <- position
   x1 <- upper
   x2s <- typeArguments0
   x3s <- many $ do
+    pos <- position
     x4 <- dotUpper
     x5s <- typeArguments0
-    return (x4, x5s)
-  return $ (x1, x2s) : x3s
+    return (pos, x4, x5s)
+  return $ (pos, x1, x2s) : x3s
 
 leftBracket :: AmbiguousParser ()
 leftBracket = isToken LeftBracketToken

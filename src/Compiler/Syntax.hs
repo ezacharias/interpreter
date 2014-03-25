@@ -6,7 +6,7 @@ import qualified Compiler.Type as Type
 data Program = Program [Dec]
                deriving (Eq, Show)
 
-type Name = (String, [Type])
+type Name = (Pos, String, [Type])
 type Path = [Name]
 
 data Dec = FunDec Pos [Type.Type] Type.Type String [String] [Pat] Type Term

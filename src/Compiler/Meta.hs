@@ -111,29 +111,29 @@ updateTerm t =
       return $ Syntax.UnitTerm pos
     Syntax.UpperTerm pos _ _ q ->
       case q of
-        [("Continue", [])] ->
+        [(pos, "Continue", [])] ->
           return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Continue" []])
                      (Type.Arrow (Type.Arrow Type.Unit (Type.Variant (Type.Path [Type.Name "Output" []])))
                                  (Type.Variant (Type.Path [Type.Name "Output" []])))
-                     [("Continue", [])]
-        [("Exit", [])] ->
+                     [(pos, "Continue", [])]
+        [(pos, "Exit", [])] ->
           return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Exit" []])
                      (Type.Variant (Type.Path [Type.Name "Output" []]))
-                     [("Exit", [])]
-        [("Write", [])] ->
+                     [(pos, "Exit", [])]
+        [(pos, "Write", [])] ->
           return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Write" []])
                      (Type.Arrow Type.String
                                  (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
                                              (Type.Variant (Type.Path [Type.Name "Output" []]))))
-                     [("Write", [])]
-        [("Unreachable", tys)] -> do
+                     [(pos, "Write", [])]
+        [(pos, "Unreachable", tys)] -> do
           ty' <- case tys of
             [] -> gen
             [ty] -> convertType ty
             _ -> unreachable "updateTerm"
           return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Unreachable" [ty']])
                      ty'
-                     [("Unreachable", tys)]
+                     [(pos, "Unreachable", tys)]
         _ -> do
           -- _ <- trace ("3 " ++ show q) (return ())
           q' <- convertPath q
@@ -198,7 +198,7 @@ convertPath q = do
   return $ Type.Path ns
 
 convertName :: Syntax.Name -> M Type.Name
-convertName (s, tys) = do
+convertName (_, s, tys) = do
   tys <- mapM convertType tys
   return $ Type.Name s tys
 

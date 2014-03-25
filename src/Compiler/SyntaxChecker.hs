@@ -217,7 +217,7 @@ isTypeVariableFoundInPath :: String -> Syntax.Path -> Bool
 isTypeVariableFoundInPath v q = or (map (isTypeVariableFoundInName v) q)
 
 isTypeVariableFoundInName :: String -> Syntax.Name -> Bool
-isTypeVariableFoundInName v (_, tys) = or (map (isTypeVariableFoundInType v) tys)
+isTypeVariableFoundInName v (_, _, tys) = or (map (isTypeVariableFoundInType v) tys)
 
 isTypeVariableFoundInType :: String -> Syntax.Type -> Bool
 isTypeVariableFoundInType v ty =
@@ -240,8 +240,47 @@ checkIfPathIsValidFun q =
     [n] -> checkIfNameIsValidFun n
     (n:ns) -> checkIfComplexPathIsValidFun n ns
 
+checkIfNameIsValidFun :: Syntax.Name -> M ()
+checkIfNameIsValidFun n = do
+  r <- look envStack
+  case r of
+    -- Check builtin functions.
+    [] -> later
+    (decs:r) -> do
+      case search (isNameValidFun n) decs of
+        Nothing -> with (\ l -> l {envStack = r}) (checkIfNameIsValidFun n)
+        Just m -> m
+
+isNameValidFun :: Syntax.Name -> Syntax.Dec -> Maybe (M ())
+isNameValidFun (pos, s1, v1s) dec =
+  case dec of
+    Syntax.FunDec _ _ _ s2 v2s _ _ _ | s1 == s2 -> Just $ do
+      when (length v1s /= 0) $ do
+        when (length v1s /= length v2s) $ do
+          syntaxErrorLineCol pos $ "Incorrect type arity for " ++ nameString (pos, s1, v1s) ++ "."
+    Syntax.SumDec _ _ _ v2s cs ->
+      search (isNameValidConstructor (pos, s1, v1s) v2s) cs
+    _ -> Nothing
+
+isNameValidConstructor :: Syntax.Name -> [String] -> (Syntax.Pos, [Type.Type], String, [Syntax.Type]) -> Maybe (M ())
+isNameValidConstructor (pos, s1, v1s) v2s c =
+  case c of
+    (_, _, s2, tys) | s1 == s2 -> Just $ do
+      when (length v1s /= 0) $ do
+        when (length v1s /= length v2s) $ do
+          syntaxErrorLineCol pos $ "Incorrect type arity for " ++ nameString (pos, s1, v1s) ++ "."
+    _ -> Nothing
+
 checkIfComplexPathIsValidFun :: Syntax.Name -> [Syntax.Name] -> M ()
-checkIfComplexPathIsValidFun n ns = later
+checkIfComplexPathIsValidFun n ns =
+  inModuleWithNameArityCheck n $ do
+    later
+
+inModuleWithNameArityCheck :: Syntax.Name -> M () -> M ()
+inModuleWithNameArityCheck _ _ = later
+
+
+
 
 inModuleWithName :: Syntax.Name -> M () -> M ()
 inModuleWithName n m = later
@@ -250,7 +289,7 @@ inModuleWithField :: Syntax.Name -> M () -> M ()
 inModuleWithField n m = later
 
 isNameValidModule :: Syntax.Name -> Syntax.Dec -> M () -> Maybe (M ())
-isNameValidModule (s1, v1s) dec m =
+isNameValidModule (pos, s1, v1s) dec m =
   case dec of
     Syntax.ModDec _ s2 v2s decs | s1 == s2 -> Just $ do
       when (length v1s /= 0) $ do
@@ -265,37 +304,6 @@ isNameValidModule (s1, v1s) dec m =
 
 inUnitWithPath :: Syntax.Path -> M () -> M ()
 inUnitWithPath _ _ = later
-
-checkIfNameIsValidFun :: Syntax.Name -> M ()
-checkIfNameIsValidFun n = do
-  r <- look envStack
-  case r of
-    -- Check builtin functions.
-    [] -> later
-    (decs:r) -> do
-      case search (isNameValidFun n) decs of
-        Nothing -> with (\ l -> l {envStack = r}) (checkIfNameIsValidFun n)
-        Just m -> m
-
-isNameValidFun :: Syntax.Name -> Syntax.Dec -> Maybe (M ())
-isNameValidFun (s1, v1s) dec =
-  case dec of
-    Syntax.FunDec _ _ _ s2 v2s _ _ _ | s1 == s2 -> Just $ do
-      when (length v1s /= 0) $ do
-        when (length v1s /= length v2s) $ do
-          fail $ "function type arity mismatch"
-    Syntax.SumDec _ _ _ v2s cs ->
-      search (isNameValidConstructor (s1, v1s) v2s) cs
-    _ -> Nothing
-
-isNameValidConstructor :: Syntax.Name -> [String] -> (Syntax.Pos, [Type.Type], String, [Syntax.Type]) -> Maybe (M ())
-isNameValidConstructor (s1, v1s) v2s c =
-  case c of
-    (pos, _, s2, tys) | s1 == s2 -> Just $ do
-      when (length v1s /= 0) $ do
-        when (length v1s /= length v2s) $ do
-          fail $ "function type arity mismatch"
-    _ -> Nothing
 
 checkIfPathIsValidType :: Syntax.Path -> M ()
 checkIfPathIsValidType q = later
@@ -390,7 +398,11 @@ with f m = M (\ o k d -> runM m (f o) k d)
 --------------------------------------------------------------------------------
 
 nameString :: Syntax.Name -> String
-nameString (s, vs) = todo "nameString"
+nameString (_, s, vs) =
+  case vs of
+    [] -> s
+    [v] -> s ++ "⟦" ++ typeString 0 v ++ "⟧"
+    (v:vs) -> s ++ "⟦" ++ typeString 0 v ++ concat (map (\ v -> ", " ++ typeString 0 v) vs) ++ "⟧"
 
 pathString :: Syntax.Path -> String
 pathString q =
@@ -398,6 +410,18 @@ pathString q =
     [] -> unreachable "pathString"
     [n] -> nameString n
     (n:ns) -> nameString n ++ concat (map (\ n -> "." ++ nameString n) ns)
+
+typeString :: Int -> Syntax.Type -> String
+typeString level ty =
+  case ty of
+    Syntax.ArrowType ty1 ty2 | level == 0 -> typeString 1 ty1 ++ "⟶" ++ typeString 0 ty2
+    Syntax.ArrowType ty1 ty2 | otherwise  -> "(" ++ typeString 1 ty1 ++ "⟶" ++ typeString 0 ty2 ++ ")"
+    Syntax.LowerType _ s -> s
+    Syntax.TupleType [] -> unreachable "typeString"
+    Syntax.TupleType [ty] -> unreachable "typeString"
+    Syntax.TupleType (ty:tys) -> "(" ++ typeString 0 ty ++ concat (map (\ ty -> ", " ++ typeString 0 ty) tys) ++ ")"
+    Syntax.UnitType _ -> "()"
+    Syntax.UpperType _ q -> pathString q
 
 bar01 :: Int -> Syntax.Name -> String
 bar01 line n = syntaxError line $ "Module " ++ nameString n ++ " not found."
@@ -411,6 +435,10 @@ syntaxError line s = todo "syntaxError"
 syntaxErrorLine :: Syntax.Pos -> String -> M a
 syntaxErrorLine (Syntax.Pos filename line col) msg =
   fail $ filename ++ ":" ++ show line ++ ": Syntax error: " ++ msg
+
+syntaxErrorLineCol :: Syntax.Pos -> String -> M a
+syntaxErrorLineCol (Syntax.Pos filename line col) msg =
+  fail $ filename ++ ":" ++ show line ++ ":" ++ show col ++ ": Syntax error: " ++ msg
 
 relativePosition :: Syntax.Pos -> Syntax.Pos -> String
 relativePosition (Syntax.Pos filename1 line1 col1) (Syntax.Pos filename2 line2 col2) =
