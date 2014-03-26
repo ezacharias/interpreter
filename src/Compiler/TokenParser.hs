@@ -50,11 +50,10 @@ withPatsLocals pats p = do
   withLocalEnv (envWith r ss) p
 
 
--- The continuation takes a line and a possible column.
-
 -- | An ambiguous parser takes a continuation, but may call the continuation multiple times with different results.
 newtype AmbiguousParser a = AmbiguousParser ((a -> AmbiguousParserContinuation) -> AmbiguousParserContinuation)
 
+-- | The continuation takes a line and a possible column.
 type AmbiguousParserContinuation = Int -> Maybe Int -> Env -> TokenParser Syntax.Program
 
 instance Monad AmbiguousParser where
@@ -503,12 +502,10 @@ sumDec :: AmbiguousParser Syntax.Dec
 sumDec = do
   pos@(Syntax.Pos _ l c) <- position
   keyword "sum"
-  e1 <- upper
-  e2 <- choice [ typParameters
-               , return []
-               ]
-  e3 <- many $ indented (c + 2) constructor
-  return $ Syntax.SumDec pos (Type.Path []) e1 e2 e3
+  x1 <- upper
+  x2 <- optional0 typParameters
+  x3 <- many $ indented (c + 2) constructor
+  return $ Syntax.SumDec pos (Type.Path []) x1 x2 x3
 
 constructor :: AmbiguousParser (Syntax.Pos, [Type.Type], String, [Syntax.Type])
 constructor = do
@@ -550,12 +547,10 @@ unitDec :: AmbiguousParser Syntax.Dec
 unitDec = do
   pos@(Syntax.Pos _ _ c) <- position
   keyword "unit"
-  e1 <- upper
-  e2 <- choice [ typParameters
-               , return []
-               ]
-  e3 <- many $ indented (c + 2) dec
-  return $ Syntax.UnitDec pos e1 e2 e3
+  x1 <- upper
+  x2 <- optional0 typParameters
+  x3 <- many $ indented (c + 2) dec
+  return $ Syntax.UnitDec pos x1 x2 x3
 
 optional0 :: Alternative f => f [a] -> f [a]
 optional0 x = x <|> pure []

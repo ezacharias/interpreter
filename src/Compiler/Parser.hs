@@ -1,6 +1,6 @@
 module Compiler.Parser where
 
-import qualified Compiler.Syntax as Syntax
+import qualified Compiler.Syntax      as Syntax
 import           Compiler.Token
 import           Compiler.Tokenizer
 import           Compiler.TokenParser

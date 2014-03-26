@@ -4,21 +4,22 @@
 -- matter how long a path to a unit is and you can always substituto to the
 -- parent module.
 
--- Think about whether we must do an arity check for paths. We must check for
--- all paths except paths to functions in a function body.
+-- Type arguments are required in all cases except for paths to functions and
+-- paths to constructors.
 
 -- Do we check that constructors in bindings are singleton types?
--- Should we check constructor arity in the type checker?
 -- How should we check completeness of case terms?
--- Make sure substitutions work properly when looking up declarations.
+-- It seems to me both of these should happen after type-checking.
+
+-- We don't check declaring over builtins.
 
 module Compiler.SyntaxChecker where
 
-import Control.Monad (forM_, when, unless)
-import Data.Either ()
+import           Control.Monad   (forM_, unless, when)
+import           Data.Either     ()
 
-import qualified Compiler.Type as Type
 import qualified Compiler.Syntax as Syntax
+import qualified Compiler.Type   as Type
 
 -- Either returns nothing of there were no errors or returns the error string.
 
@@ -65,8 +66,7 @@ checkDec dec =
       checkIfTypeVariablesAreUsedMoreThanOnce pos vs
       checkIfTypeVariablesShadow pos vs
       withTypeVariables vs $
-        withSomething $
-          mapM_ checkConstructor cs
+        mapM_ checkConstructor cs
     Syntax.UnitDec pos s1 vs decs -> do
       checkIfModuleNameIsAlreadyUsed pos s1
       checkIfTypeVariablesAreUsedMoreThanOnce pos vs
@@ -84,7 +84,7 @@ checkType ty =
     Syntax.LowerType pos s -> do
       vs <- look boundTypeVariables
       unless (elem s vs) $
-        syntaxErrorLine pos $ "Type variable name " ++ s ++ " is unbound."
+        syntaxErrorLine pos $ "Type variable " ++ s ++ " is unbound."
     Syntax.TupleType tys ->
       mapM_ checkType tys
     Syntax.UnitType pos ->
@@ -118,7 +118,7 @@ checkTerm t =
     Syntax.StringTerm pos s ->
       return ()
     Syntax.TupleTerm pos _ ts ->
-      mapM_ checkTerm ts
+      forM_ ts checkTerm
     Syntax.UnitTerm pos ->
       return ()
     Syntax.UpperTerm pos _ _ q ->
@@ -156,7 +156,7 @@ reallyCheckPat p =
     Syntax.UnitPat pos ->
       return ()
     Syntax.UpperPat pos _ _ _ q ps -> do
-      checkIfPathIsValidConstructor q
+      checkIfPathIsValidConstructor q (length ps)
       forM_ ps reallyCheckPat
 
 -- These both check if the declaration is in the namespace at the current level
@@ -166,21 +166,21 @@ checkIfFunctionNameIsAlreadyUsed :: Syntax.Pos -> String -> M ()
 checkIfFunctionNameIsAlreadyUsed pos1 s1 = do
   s2s <- get functionNames
   case lookup s1 s2s of
-    Just pos2 -> syntaxErrorLine pos1 $ "Function name " ++ s1 ++ " declared previously " ++ relativePosition pos1 pos2 ++ "."
+    Just pos2 -> syntaxErrorLine pos1 $ "Function " ++ s1 ++ " declared previously " ++ relativePosition pos1 pos2 ++ "."
     Nothing -> set (\ s -> s {functionNames = (s1, pos1) : s2s})
 
 checkIfTypeNameIsAlreadyUsed :: Syntax.Pos -> String -> M ()
 checkIfTypeNameIsAlreadyUsed pos1 s1 = do
   s2s <- get typeNames
   case lookup s1 s2s of
-    Just pos2 -> syntaxErrorLine pos1 $ "Type name " ++ s1 ++ " declared previously " ++ relativePosition pos1 pos2 ++ "."
+    Just pos2 -> syntaxErrorLine pos1 $ "Type " ++ s1 ++ " declared previously " ++ relativePosition pos1 pos2 ++ "."
     Nothing -> set (\ s -> s {typeNames = (s1, pos1) : s2s})
 
 checkIfModuleNameIsAlreadyUsed :: Syntax.Pos -> String -> M ()
 checkIfModuleNameIsAlreadyUsed pos1 s1 = do
   s2s <- get moduleNames
   case lookup s1 s2s of
-    Just pos2 -> syntaxErrorLine pos1 $ "Module name " ++ s1 ++ " declared previously " ++ relativePosition pos1 pos2 ++ "."
+    Just pos2 -> syntaxErrorLine pos1 $ "Module " ++ s1 ++ " declared previously " ++ relativePosition pos1 pos2 ++ "."
     Nothing -> set (\ s -> s {moduleNames = (s1, pos1) : s2s})
 
 checkIfTypeVariablesAreUsedMoreThanOnce :: Syntax.Pos -> [String] -> M ()
@@ -188,7 +188,7 @@ checkIfTypeVariablesAreUsedMoreThanOnce pos vs = f vs []
   where f [] xs = return ()
         f (v:vs) xs = do
           when (elem v xs) $
-            syntaxErrorLine pos $ "Type variable name " ++ v ++ " used more than once."
+            syntaxErrorLine pos $ "Type variable " ++ v ++ " used more than once."
           f vs (v:xs)
 
 checkIfTypeVariablesShadow :: Syntax.Pos -> [String] -> M ()
@@ -196,7 +196,7 @@ checkIfTypeVariablesShadow pos v1s = do
   v2s <- look boundTypeVariables
   forM_ v1s $ \ v1 ->
     when (elem v1 v2s) $
-      syntaxErrorLine pos $ "Type variable name " ++ v1 ++ " shadows previous type variable."
+      syntaxErrorLine pos $ "Type variable " ++ v1 ++ " shadows a previous type variable."
 
 withTypeVariables :: [String] -> M a -> M a
 withTypeVariables vs m =
@@ -209,9 +209,8 @@ checkIfAllTypeVariablesAreFoundInPath pos q vs = forM_ vs (checkIfTypeVariableIs
 
 checkIfTypeVariableIsFoundInPath :: Syntax.Pos -> Syntax.Path -> String -> M ()
 checkIfTypeVariableIsFoundInPath pos q v =
-  if isTypeVariableFoundInPath v q
-    then return ()
-    else syntaxErrorLine pos $ "Type variable name " ++ v ++ " is unused."
+  unless (isTypeVariableFoundInPath v q) $
+    syntaxErrorLine pos $ "Type variable " ++ v ++ " is unused."
 
 isTypeVariableFoundInPath :: String -> Syntax.Path -> Bool
 isTypeVariableFoundInPath v q = or (map (isTypeVariableFoundInName v) q)
@@ -228,25 +227,30 @@ isTypeVariableFoundInType v ty =
     Syntax.UnitType _ -> False
     Syntax.UpperType _ q -> isTypeVariableFoundInPath v q
 
+
 type Path = [Name]
 
 type Name = (NameType, Focus, Syntax.Pos, String, Arity)
 
 data NameType =
    FunName
- | ConName
+   -- | The number of arguments to a pattern are checked by the syntax checker.
+ | ConName Int
  | ModName
  | TypeName
  | UnitName
    deriving (Show, Eq)
 
+-- | The focus is whether we are searching for an internal name or an external
+--   field.
 data Focus =
    NameFocus
  | FieldFocus
    deriving (Show, Eq)
 
--- Do not do an arity test if arity is Nothing.
+-- | Do not do an arity test if arity is Nothing.
 type Arity = Maybe Int
+
 
 checkArity :: Name -> [a] -> M ()
 checkArity (x, _, pos, s, arity) vs =
@@ -255,7 +259,7 @@ checkArity (x, _, pos, s, arity) vs =
       return ()
     Just n ->
       unless (length vs == n) $
-        syntaxErrorLineCol pos $ "Incorrect type arity for " ++ nameTypeString x ++ " " ++ s ++ "."
+        syntaxErrorLineCol pos $ "Incorrect number of type arguments for " ++ nameTypeString x ++ " " ++ s ++ "."
 
 reallyCheckPath :: [[Syntax.Dec]] -> [Name] -> [Syntax.Dec] -> M ()
 reallyCheckPath r names decs =
@@ -263,7 +267,7 @@ reallyCheckPath r names decs =
     ([], _) -> return ()
     (name@(FunName, _, pos, s1, arity) : _, Syntax.FunDec _ _ _ s2 vs _ _ _ : _) | s1 == s2 -> do
       checkArity name vs
-    (name@(ConName, _, pos, s1, arity) : _, Syntax.FunDec _ _ _ s2 _ _ _ _ : _) | s1 == s2 -> do
+    (name@(ConName _, _, pos, s1, arity) : _, Syntax.FunDec _ _ _ s2 _ _ _ _ : _) | s1 == s2 -> do
       syntaxErrorLineCol pos $ "Pattern contains a reference to regular function " ++ s2 ++ " rather than to a constructor."
     (name@(ModName, _, pos, s1, arity) : names', Syntax.ModDec _ s2 vs decs : _) | s1 == s2 -> do
       checkArity name vs
@@ -297,16 +301,18 @@ reallyCheckPath r names decs =
               (_ : cs) ->
                 iter cs
        in iter cs
-    (name@(ConName, _, pos, s1, arity) : _, Syntax.SumDec _ _ _ _ cs : _) ->
+    (name@(ConName n, _, pos, s1, arity) : _, Syntax.SumDec _ _ _ vs cs : _) ->
       let iter cs =
             case cs of
               [] ->
                 return ()
-              ((_, _, s2, vs) : _) | s1 == s2 ->
-                checkArity name vs
+              ((_, _, s2, ps) : _) | s1 == s2 ->
+                unless (n == length ps) $
+                  syntaxErrorLineCol pos $ "Incorrect number of arguments for constructor " ++ s1 ++ "."
               (_ : cs) ->
                 iter cs
-       in iter cs
+       in do checkArity name vs
+             iter cs
     (_, _ : decs') ->
       reallyCheckPath r names decs'
     (name@(x, FieldFocus, pos, s1, _) : names', []) ->
@@ -339,7 +345,7 @@ nameTypeString :: NameType -> String
 nameTypeString x =
   case x of
     FunName -> "function"
-    ConName -> "constructior"
+    ConName _ -> "constructor"
     ModName -> "module"
     TypeName -> "type"
     UnitName -> "unit"
@@ -364,7 +370,7 @@ convertArity x vs =
     0 ->
       case x of
         FunName -> Nothing
-        ConName -> Nothing
+        ConName _ -> Nothing
         ModName -> Just 0
         TypeName -> Just 0
         UnitName -> Just 0
@@ -377,8 +383,8 @@ checkIfPathIsValid x q = do
     [] -> reallyCheckPath [] (convertPath x q) []
     (decs : _) -> reallyCheckPath r (convertPath x q) decs
 
-checkIfPathIsValidConstructor :: Syntax.Path -> M ()
-checkIfPathIsValidConstructor q = checkIfPathIsValid ConName q
+checkIfPathIsValidConstructor :: Syntax.Path -> Int -> M ()
+checkIfPathIsValidConstructor q n = checkIfPathIsValid (ConName n) q
 
 checkIfPathIsValidFun :: Syntax.Path -> M ()
 checkIfPathIsValidFun q = checkIfPathIsValid FunName q
@@ -401,7 +407,7 @@ checkIfValueVariableIsUsedMultipleTimes :: Syntax.Pos -> String -> M ()
 checkIfValueVariableIsUsedMultipleTimes pos v = do
   vs <- get valueVariables
   when (elem v vs) $
-    syntaxErrorLine pos $ "Variable name " ++ v ++ " used more than once in pattern."
+    syntaxErrorLine pos $ "Variable " ++ v ++ " is used more than once in pattern."
   set (\ s -> s {valueVariables = (v:vs)})
 
 withDecs :: [Syntax.Dec] -> M a -> M a
@@ -411,9 +417,6 @@ withDecs decs m = do
   x <- with (\ l -> l {envStack = decs : envStack l}) m
   set (\ _ -> s)
   return x
-
-withSomething :: M a -> M a
-withSomething m = m
 
 withEmptyVariables :: M a -> M a
 withEmptyVariables m = do
@@ -443,14 +446,14 @@ newtype M a = M { runM :: Look -> (a -> State -> Maybe String) -> State -> Maybe
 
 data State = State
  { valueVariables :: [String]
- , moduleNames :: [(String, Syntax.Pos)]
- , typeNames :: [(String, Syntax.Pos)]
+ , moduleNames    :: [(String, Syntax.Pos)]
+ , typeNames      :: [(String, Syntax.Pos)]
    -- Name and line of function.
- , functionNames :: [(String, Syntax.Pos)]
+ , functionNames  :: [(String, Syntax.Pos)]
  }
 
 data Look = Look
- { envStack :: [[Syntax.Dec]]
+ { envStack           :: [[Syntax.Dec]]
  , boundTypeVariables :: [String]
  }
 
@@ -501,15 +504,6 @@ typeString level ty =
     Syntax.UnitType _ -> "()"
     Syntax.UpperType _ q -> pathString q
 
-bar01 :: Int -> Syntax.Name -> String
-bar01 line n = syntaxError line $ "Module " ++ nameString n ++ " not found."
-
-bar02 :: Int -> Syntax.Name -> Syntax.Path -> String
-bar02 line n q = syntaxError line $ "Module " ++ nameString n ++ " at " ++ pathString q ++ " not found."
-
-syntaxError :: Int -> String -> String
-syntaxError line s = todo "syntaxError"
-
 syntaxErrorLine :: Syntax.Pos -> String -> M a
 syntaxErrorLine (Syntax.Pos filename line col) msg =
   fail $ filename ++ ":" ++ show line ++ ": Syntax error: " ++ msg
@@ -525,13 +519,6 @@ relativePosition (Syntax.Pos filename1 line1 col1) (Syntax.Pos filename2 line2 c
 --------------------------------------------------------------------------------
 -- Utilities
 --------------------------------------------------------------------------------
-
-later :: M ()
-later = return ()
-
-search :: (a -> Maybe b) -> [a] -> Maybe b
-search f [] = Nothing
-search f (x:xs) = maybe (search f xs) Just (f x)
 
 todo :: String -> a
 todo s = error $ "todo: SyntaxChecker." ++ s
