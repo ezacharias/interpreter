@@ -20,61 +20,62 @@ present c   (TokenizerCharRequest k)   = k (Just c)
 present c t@(TokenizerError pos)       = t
 
 tokenizer :: Tokenizer
-tokenizer = unsureStart posStart
+tokenizer = unsure posStart
 
-unsureStart :: Position -> Tokenizer
-unsureStart pos = TokenizerCharRequest check
+-- Start of file or after two blank lines.
+unsure :: Position -> Tokenizer
+unsure pos = TokenizerCharRequest check
   where check Nothing = TokenizerEndOfFile pos
         check (Just c) = test c
-        test ' '  = unsureBlock (colSucc pos)
-        test '\n' = unsureStart (lineSucc pos)
+        test ' '  = unsureSpaces (colSucc pos)
+        test '\n' = unsure (lineSucc pos)
         test c    = commentBlock (colSucc pos)
 
-unsureBlock :: Position -> Tokenizer
-unsureBlock pos = TokenizerCharRequest check
+unsureSpaces :: Position -> Tokenizer
+unsureSpaces pos = TokenizerCharRequest check
   where check Nothing = TokenizerEndOfFile pos
         check (Just c) = test c
-        test ' '  = unsureBlock (colSucc pos)
-        test '\n' = unsureStart (lineSucc pos)
+        test ' '  = unsureSpaces (colSucc pos)
+        test '\n' = unsure (lineSucc pos)
         test c    = present c $ tok pos
 
 commentBlock :: Position -> Tokenizer
 commentBlock pos = TokenizerCharRequest check
   where check Nothing = TokenizerEndOfFile pos
         check (Just c) = test c
-        test '\n' = commentBlockStart1 (lineSucc pos)
+        test '\n' = commentBlankLine1 (lineSucc pos)
         test c    = commentBlock (colSucc pos)
 
-commentBlockStart1 :: Position -> Tokenizer
-commentBlockStart1 pos = TokenizerCharRequest check
+commentBlankLine1 :: Position -> Tokenizer
+commentBlankLine1 pos = TokenizerCharRequest check
   where check Nothing = TokenizerEndOfFile pos
         check (Just c) = test c
-        test ' '  = commentBlockStart1 (colSucc pos)
-        test '\n' = commentBlockStart2 (lineSucc pos)
+        test ' '  = commentBlankLine1 (colSucc pos)
+        test '\n' = commentBlankLine2 (lineSucc pos)
         test c    = commentBlock (colSucc pos)
 
-commentBlockStart2 :: Position -> Tokenizer
-commentBlockStart2 pos = TokenizerCharRequest check
+commentBlankLine2 :: Position -> Tokenizer
+commentBlankLine2 pos = TokenizerCharRequest check
   where check Nothing = TokenizerEndOfFile pos
         check (Just c) = test c
-        test '\n' = unsureStart (lineSucc pos)
-        test ' '  = commentBlockStart2 (colSucc pos)
+        test '\n' = unsure (lineSucc pos)
+        test ' '  = commentBlankLine2 (colSucc pos)
         test c    = commentBlock (colSucc pos)
 
-codeStart1 :: Position -> Tokenizer
-codeStart1 pos = TokenizerCharRequest check
+codeBlankLine1 :: Position -> Tokenizer
+codeBlankLine1 pos = TokenizerCharRequest check
   where check Nothing = TokenizerEndOfFile pos
         check (Just c) = test c
-        test '\n' = codeStart2 (lineSucc pos)
-        test ' '  = codeStart1 (colSucc pos)
+        test '\n' = codeBlankLine2 (lineSucc pos)
+        test ' '  = codeBlankLine1 (colSucc pos)
         test c    = present c $ tok pos
 
-codeStart2 :: Position -> Tokenizer
-codeStart2 pos = TokenizerCharRequest check
+codeBlankLine2 :: Position -> Tokenizer
+codeBlankLine2 pos = TokenizerCharRequest check
   where check Nothing = TokenizerEndOfFile pos
         check (Just c) = test c
-        test '\n' = unsureStart (lineSucc pos)
-        test ' '  = codeStart2 (colSucc pos)
+        test '\n' = unsure (lineSucc pos)
+        test ' '  = codeBlankLine2 (colSucc pos)
         test c    = present c $ tok pos
 
 -- The main token matcher.
@@ -85,7 +86,7 @@ tok pos = TokenizerCharRequest check
         test '-'  = dash (colSucc pos)
         test '.'  = dot (colSucc pos)
         test ' '  = tok (colSucc pos)
-        test '\n' = codeStart1 (lineSucc pos)
+        test '\n' = codeBlankLine1 (lineSucc pos)
         test '='  = TokenizerToken pos EqualsToken (tok (colSucc pos))
         test ':'  = TokenizerToken pos ColonToken (tok (colSucc pos))
         test '('  = TokenizerToken pos LeftParenToken (tok (colSucc pos))
@@ -126,7 +127,7 @@ skipLine :: Position -> Tokenizer
 skipLine pos = TokenizerCharRequest check
   where check Nothing = TokenizerEndOfFile pos
         check (Just c) = test c
-        test '\n' = codeStart1 (lineSucc pos)
+        test '\n' = codeBlankLine1 (lineSucc pos)
         test _    = skipLine (colSucc pos)
 
 -- In digit, lower, and upper, we pass a reversed string of matched characters to use when matching is complete.

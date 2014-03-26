@@ -3,6 +3,11 @@ The minimial program.
 
     Main : Output
       E.Catch(F)(G)
+
+
+This is a comment block.
+
+
  --   Write("Hello")(Continue(Constant(Exit)))
 
     F() : Output
