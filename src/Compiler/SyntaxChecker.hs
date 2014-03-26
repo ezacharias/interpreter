@@ -228,91 +228,169 @@ isTypeVariableFoundInType v ty =
     Syntax.UnitType _ -> False
     Syntax.UpperType _ q -> isTypeVariableFoundInPath v q
 
--- These search the enviroment for the declaration and check against it.
+type Path = [Name]
 
-checkIfPathIsValidConstructor :: Syntax.Path -> M ()
-checkIfPathIsValidConstructor q = later
+type Name = (NameType, Focus, Syntax.Pos, String, Arity)
 
-checkIfPathIsValidFun :: Syntax.Path -> M ()
-checkIfPathIsValidFun q =
-  case q of
-    [] -> unreachable "checkIfPathIsValidFun"
-    [n] -> checkIfNameIsValidFun n
-    (n:ns) -> checkIfComplexPathIsValidFun n ns
+data NameType =
+   FunName
+ | ConName
+ | ModName
+ | TypeName
+ | UnitName
+   deriving (Show, Eq)
 
-checkIfNameIsValidFun :: Syntax.Name -> M ()
-checkIfNameIsValidFun n = do
+data Focus =
+   NameFocus
+ | FieldFocus
+   deriving (Show, Eq)
+
+-- Do not do an arity test if arity is Nothing.
+type Arity = Maybe Int
+
+checkArity :: Name -> [a] -> M ()
+checkArity (x, _, pos, s, arity) vs =
+  case arity of
+    Nothing ->
+      return ()
+    Just n ->
+      unless (length vs == n) $
+        syntaxErrorLineCol pos $ "Incorrect type arity for " ++ nameTypeString x ++ " " ++ s ++ "."
+
+reallyCheckPath :: [[Syntax.Dec]] -> [Name] -> [Syntax.Dec] -> M ()
+reallyCheckPath r names decs =
+  case (names, decs) of
+    ([], _) -> return ()
+    (name@(FunName, _, pos, s1, arity) : _, Syntax.FunDec _ _ _ s2 vs _ _ _ : _) | s1 == s2 -> do
+      checkArity name vs
+    (name@(ConName, _, pos, s1, arity) : _, Syntax.FunDec _ _ _ s2 _ _ _ _ : _) | s1 == s2 -> do
+      syntaxErrorLineCol pos $ "Pattern contains a reference to regular function " ++ s2 ++ " rather than to a constructor."
+    (name@(ModName, _, pos, s1, arity) : names', Syntax.ModDec _ s2 vs decs : _) | s1 == s2 -> do
+      checkArity name vs
+      reallyCheckPath (decs : r) names' decs
+    (name@(ModName, _, pos, s1, arity) : names', Syntax.NewDec _ _ s2 vs q : _) | s1 == s2 -> do
+      checkArity name vs
+      q' <- return $ convertPath UnitName q
+      case r of
+        [] -> reallyCheckPath r (q' ++ names') []
+        (decs : r') -> reallyCheckPath r (q' ++ names') decs
+    (name@(ModName, NameFocus, pos, s1, arity) : names', Syntax.SubDec _ _ s2 vs q : _) | s1 == s2 -> do
+      checkArity name vs
+      q' <- return $ convertPath ModName q
+      case r of
+        [] -> reallyCheckPath r (q' ++ names') []
+        (decs : r') -> reallyCheckPath r' (q' ++ names') decs
+    (name@(ModName, FieldFocus, pos, s1, arity) : names', Syntax.SubDec _ _ s2 vs q : _) | s1 == s2 -> do
+      return () -- should we have a message here?
+    (name@(UnitName, _, pos, s1, arity) : names', Syntax.UnitDec _ s2 vs decs : _) | s1 == s2 -> do
+      checkArity name vs
+      reallyCheckPath (decs : r) names' decs
+    (name@(TypeName, _, pos, s1, arity) : _, Syntax.SumDec _ _ s2 vs cs : _) | s1 == s2 -> do
+      checkArity name vs
+    (name@(FunName, _, pos, s1, arity) : _, Syntax.SumDec _ _ _ _ cs : _) ->
+      let iter cs =
+            case cs of
+              [] ->
+                return ()
+              ((_, _, s2, vs) : _) | s1 == s2 ->
+                checkArity name vs
+              (_ : cs) ->
+                iter cs
+       in iter cs
+    (name@(ConName, _, pos, s1, arity) : _, Syntax.SumDec _ _ _ _ cs : _) ->
+      let iter cs =
+            case cs of
+              [] ->
+                return ()
+              ((_, _, s2, vs) : _) | s1 == s2 ->
+                checkArity name vs
+              (_ : cs) ->
+                iter cs
+       in iter cs
+    (_, _ : decs') ->
+      reallyCheckPath r names decs'
+    (name@(x, FieldFocus, pos, s1, _) : names', []) ->
+      syntaxErrorLineCol pos $ "Could not find " ++ nameTypeString x ++ " " ++ s1 ++ "."
+    (name@(_, NameFocus, _, s1, _) : names', []) ->
+      case r of
+        [] -> unreachable "reallyCheckPath"
+        (_ : decs : r') -> reallyCheckPath (decs : r') names decs
+        (_ : []) ->
+          case names of
+            [name@(TypeName, NameFocus, _, "String", arity)] ->
+              checkArity name []
+            [name@(TypeName, NameFocus, _, "Output", arity)] ->
+              checkArity name []
+            [name@(FunName, NameFocus, _, "Exit", arity)] ->
+              checkArity name []
+            [name@(FunName, NameFocus, _, "Write", arity)] ->
+              checkArity name []
+            [name@(UnitName, NameFocus, _, "Escape", arity)] ->
+              checkArity name [(), ()]
+            [name1@(UnitName, NameFocus, _, "Escape", arity1), name2@(FunName, FieldFocus, _, "Catch", arity2)] -> do
+              checkArity name1 [(), ()]
+              checkArity name2 [()]
+            [name1@(UnitName, NameFocus, _, "Escape", arity1), name2@(FunName, FieldFocus, _, "Throw", arity2)] -> do
+              checkArity name1 [(), ()]
+              checkArity name2 []
+            _ -> todo $ "primitive: " ++ show names
+
+nameTypeString :: NameType -> String
+nameTypeString x =
+  case x of
+    FunName -> "function"
+    ConName -> "constructior"
+    ModName -> "module"
+    TypeName -> "type"
+    UnitName -> "unit"
+
+convertPath :: NameType -> Syntax.Path -> Path
+convertPath x ns =
+  case ns of
+    [] -> unreachable "convertPath"
+    [(pos, s, vs)] -> [(x, NameFocus, pos, s, convertArity x vs)]
+    ((pos, s, vs) : ns) -> (ModName, NameFocus, pos, s, convertArity x vs) : convertPath2 x ns
+
+convertPath2 :: NameType -> Syntax.Path -> Path
+convertPath2 x ns =
+  case ns of
+    [] -> unreachable "convertPath2"
+    [(pos, s, vs)] -> [(x, FieldFocus, pos, s, convertArity x vs)]
+    ((pos, s, vs) : ns) -> (ModName, FieldFocus, pos, s, convertArity x vs) : convertPath2 x ns
+
+convertArity :: NameType -> [a] -> Arity
+convertArity x vs =
+  case length vs of
+    0 ->
+      case x of
+        FunName -> Nothing
+        ConName -> Nothing
+        ModName -> Just 0
+        TypeName -> Just 0
+        UnitName -> Just 0
+    n -> Just n
+
+checkIfPathIsValid :: NameType -> Syntax.Path -> M ()
+checkIfPathIsValid x q = do
   r <- look envStack
   case r of
-    -- Check builtin functions.
-    [] -> later
-    (decs:r) -> do
-      case search (isNameValidFun n) decs of
-        Nothing -> with (\ l -> l {envStack = r}) (checkIfNameIsValidFun n)
-        Just m -> m
+    [] -> reallyCheckPath [] (convertPath x q) []
+    (decs : _) -> reallyCheckPath r (convertPath x q) decs
 
-isNameValidFun :: Syntax.Name -> Syntax.Dec -> Maybe (M ())
-isNameValidFun (pos, s1, v1s) dec =
-  case dec of
-    Syntax.FunDec _ _ _ s2 v2s _ _ _ | s1 == s2 -> Just $ do
-      when (length v1s /= 0) $ do
-        when (length v1s /= length v2s) $ do
-          syntaxErrorLineCol pos $ "Incorrect type arity for " ++ nameString (pos, s1, v1s) ++ "."
-    Syntax.SumDec _ _ _ v2s cs ->
-      search (isNameValidConstructor (pos, s1, v1s) v2s) cs
-    _ -> Nothing
+checkIfPathIsValidConstructor :: Syntax.Path -> M ()
+checkIfPathIsValidConstructor q = checkIfPathIsValid ConName q
 
-isNameValidConstructor :: Syntax.Name -> [String] -> (Syntax.Pos, [Type.Type], String, [Syntax.Type]) -> Maybe (M ())
-isNameValidConstructor (pos, s1, v1s) v2s c =
-  case c of
-    (_, _, s2, tys) | s1 == s2 -> Just $ do
-      when (length v1s /= 0) $ do
-        when (length v1s /= length v2s) $ do
-          syntaxErrorLineCol pos $ "Incorrect type arity for " ++ nameString (pos, s1, v1s) ++ "."
-    _ -> Nothing
-
-checkIfComplexPathIsValidFun :: Syntax.Name -> [Syntax.Name] -> M ()
-checkIfComplexPathIsValidFun n ns =
-  inModuleWithNameArityCheck n $ do
-    later
-
-inModuleWithNameArityCheck :: Syntax.Name -> M () -> M ()
-inModuleWithNameArityCheck _ _ = later
-
-
-
-
-inModuleWithName :: Syntax.Name -> M () -> M ()
-inModuleWithName n m = later
-
-inModuleWithField :: Syntax.Name -> M () -> M ()
-inModuleWithField n m = later
-
-isNameValidModule :: Syntax.Name -> Syntax.Dec -> M () -> Maybe (M ())
-isNameValidModule (pos, s1, v1s) dec m =
-  case dec of
-    Syntax.ModDec _ s2 v2s decs | s1 == s2 -> Just $ do
-      when (length v1s /= 0) $ do
-        when (length v1s /= length v2s) $ do
-          fail $ "module type arity mismatch"
-      withDecs decs m
-    Syntax.NewDec _ _ s2 v2s q | s1 == s2 -> Just $
-      inUnitWithPath q m
-    Syntax.UnitDec _ s2 _ _ | s1 == s2 -> Just $
-      fail "path to unit"
-    _ -> Nothing
-
-inUnitWithPath :: Syntax.Path -> M () -> M ()
-inUnitWithPath _ _ = later
+checkIfPathIsValidFun :: Syntax.Path -> M ()
+checkIfPathIsValidFun q = checkIfPathIsValid FunName q
 
 checkIfPathIsValidType :: Syntax.Path -> M ()
-checkIfPathIsValidType q = later
+checkIfPathIsValidType q = checkIfPathIsValid TypeName q
 
 checkIfPathIsValidUnit :: Syntax.Path -> M ()
-checkIfPathIsValidUnit q = later
+checkIfPathIsValidUnit q = checkIfPathIsValid UnitName q
 
 checkIfPathIsValidModule :: Syntax.Path -> M ()
-checkIfPathIsValidModule q = later
+checkIfPathIsValidModule q = checkIfPathIsValid ModName q
 
 checkConstructor :: (Syntax.Pos, [Type.Type], String, [Syntax.Type]) -> M ()
 checkConstructor (pos, _, s1, tys) = do
