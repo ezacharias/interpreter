@@ -383,6 +383,12 @@ elaborateTerm t =
       t1 <- elaborateTerm t1
       t2 <- elaborateTerm t2
       return $ Simple.ApplyTerm t1 t2
+    Syntax.ForTerm ty1s ty2 ps t1 t2 -> do
+      t1 <- elaborateTerm t1
+      ty1s <- mapM groundType ty1s
+      ty1s <- mapM elaborateType ty1s
+      t2 <- elaborateLambda ps ty1s t2
+      return $ Simple.ApplyTerm t1 t2
     Syntax.StringTerm _ x ->
       return $ Simple.StringTerm x
     Syntax.SeqTerm t1 t2 -> do

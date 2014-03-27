@@ -13,6 +13,10 @@
 
 -- We don't check declaring over builtins.
 
+
+-- We need to check that function patterns have explicit types.
+
+
 module Compiler.SyntaxChecker where
 
 import           Control.Monad   (forM_, unless, when)
@@ -330,6 +334,8 @@ reallyCheckPath r names decs =
             [name@(FunName, NameFocus, _, "Exit", arity)] ->
               checkArity name []
             [name@(FunName, NameFocus, _, "Write", arity)] ->
+              checkArity name []
+            [name@(FunName, NameFocus, _, "Continue", arity)] ->
               checkArity name []
             [name@(UnitName, NameFocus, _, "Escape", arity)] ->
               checkArity name [(), ()]

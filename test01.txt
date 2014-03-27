@@ -2,20 +2,23 @@ The minimial program.
 
 
     Main : Output
-      E.Catch(F)(G)
-
-
-This is a comment block.
-
-
- --   Write("Hello")(Continue(Constant(Exit)))
+      IO.With(F)
 
     F() : Output
-      E.Throw("Hello")
+      IO.Print("Hello")
+      IO.Print("Bye")
       Exit
 
-    G(x : String)(k : () ⟶ Output) : Output
-      Write(x)(Exit)
+    mod IO
+
+      new E = Escape⟦String, ()⟧
+
+      With(f : () ⟶ Output) : Output
+        for (x)(k) in E.Catch(f)
+          Write(x)(Continue(k))
+
+      Print(x : String) : ()
+        E.Throw(x)
 
     Constant⟦a, b⟧(x : a)(_ : b) : a
       Identity⟦a⟧(x)
@@ -23,18 +26,6 @@ This is a comment block.
     Identity⟦a⟧(x : a) : a
       x
 
-    new E = Escape⟦String, ()⟧
- -- new J⟦a, b⟧ = Escape⟦a, b⟧
+    Written(x : String)(f : () ⟶ Output) : Output
+      Write(x)(Continue(f))
 
-    mod JA
-      unit U
-        mod JB
-          unit V
-            mod JC
-              G⟦a⟧(x : a) : a
-                x
-        new M = JB.V
-        F⟦a⟧(x : a) : a
-          M.JC.G(x)
-    mod Q
-      new N = JA.U
