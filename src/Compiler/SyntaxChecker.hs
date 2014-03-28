@@ -327,22 +327,24 @@ reallyCheckPath r names decs =
         (_ : decs : r') -> reallyCheckPath (decs : r') names decs
         (_ : []) ->
           case names of
-            [name@(TypeName, NameFocus, _, "String", arity)] ->
+            [name@(TypeName, NameFocus, _, "String", _)] ->
               checkArity name []
-            [name@(TypeName, NameFocus, _, "Output", arity)] ->
+            [name@(TypeName, NameFocus, _, "Output", _)] ->
               checkArity name []
-            [name@(FunName, NameFocus, _, "Exit", arity)] ->
+            [name@(FunName, NameFocus, _, "Exit", _)] ->
               checkArity name []
-            [name@(FunName, NameFocus, _, "Write", arity)] ->
+            [name@(FunName, NameFocus, _, "Write", _)] ->
               checkArity name []
-            [name@(FunName, NameFocus, _, "Continue", arity)] ->
+            [name@(FunName, NameFocus, _, "Continue", _)] ->
               checkArity name []
-            [name@(UnitName, NameFocus, _, "Escape", arity)] ->
+            [name@(FunName, NameFocus, _, "Unreachable", _)] ->
+              checkArity name [()]
+            [name@(UnitName, NameFocus, _, "Escape", _)] ->
               checkArity name [(), ()]
-            [name1@(UnitName, NameFocus, _, "Escape", arity1), name2@(FunName, FieldFocus, _, "Catch", arity2)] -> do
+            [name1@(UnitName, NameFocus, _, "Escape", _), name2@(FunName, FieldFocus, _, "Catch", _)] -> do
               checkArity name1 [(), ()]
               checkArity name2 [()]
-            [name1@(UnitName, NameFocus, _, "Escape", arity1), name2@(FunName, FieldFocus, _, "Throw", arity2)] -> do
+            [name1@(UnitName, NameFocus, _, "Escape", _), name2@(FunName, FieldFocus, _, "Throw", _)] -> do
               checkArity name1 [(), ()]
               checkArity name2 []
             _ -> todo $ "primitive: " ++ show names

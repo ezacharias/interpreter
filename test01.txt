@@ -28,4 +28,3 @@ The minimial program.
 
     Written(x : String)(f : () ⟶ Output) : Output
       Write(x)(Continue(f))
-
