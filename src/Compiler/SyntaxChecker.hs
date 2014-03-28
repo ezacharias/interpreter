@@ -217,17 +217,17 @@ checkIfTypeVariableIsFoundInPath pos q v =
     syntaxErrorLine pos $ "Type variable " ++ v ++ " is unused."
 
 isTypeVariableFoundInPath :: String -> Syntax.Path -> Bool
-isTypeVariableFoundInPath v q = or (map (isTypeVariableFoundInName v) q)
+isTypeVariableFoundInPath v q = any (isTypeVariableFoundInName v) q
 
 isTypeVariableFoundInName :: String -> Syntax.Name -> Bool
-isTypeVariableFoundInName v (_, _, tys) = or (map (isTypeVariableFoundInType v) tys)
+isTypeVariableFoundInName v (_, _, tys) = any (isTypeVariableFoundInType v) tys
 
 isTypeVariableFoundInType :: String -> Syntax.Type -> Bool
 isTypeVariableFoundInType v ty =
   case ty of
-    Syntax.ArrowType ty1 ty2 -> or [isTypeVariableFoundInType v ty1, isTypeVariableFoundInType v ty1]
+    Syntax.ArrowType ty1 ty2 -> isTypeVariableFoundInType v ty1 || isTypeVariableFoundInType v ty1
     Syntax.LowerType _ s -> v == s
-    Syntax.TupleType tys -> or (map (isTypeVariableFoundInType v) tys)
+    Syntax.TupleType tys -> any (isTypeVariableFoundInType v) tys
     Syntax.UnitType _ -> False
     Syntax.UpperType _ q -> isTypeVariableFoundInPath v q
 
@@ -491,14 +491,14 @@ nameString (_, s, vs) =
   case vs of
     [] -> s
     [v] -> s ++ "⟦" ++ typeString 0 v ++ "⟧"
-    (v:vs) -> s ++ "⟦" ++ typeString 0 v ++ concat (map (\ v -> ", " ++ typeString 0 v) vs) ++ "⟧"
+    (v:vs) -> s ++ "⟦" ++ typeString 0 v ++ concatMap (\ v -> ", " ++ typeString 0 v) vs ++ "⟧"
 
 pathString :: Syntax.Path -> String
 pathString q =
   case q of
     [] -> unreachable "pathString"
     [n] -> nameString n
-    (n:ns) -> nameString n ++ concat (map (\ n -> "." ++ nameString n) ns)
+    (n:ns) -> nameString n ++ concatMap (\ n -> "." ++ nameString n) ns
 
 typeString :: Int -> Syntax.Type -> String
 typeString level ty =
@@ -508,7 +508,7 @@ typeString level ty =
     Syntax.LowerType _ s -> s
     Syntax.TupleType [] -> unreachable "typeString"
     Syntax.TupleType [ty] -> unreachable "typeString"
-    Syntax.TupleType (ty:tys) -> "(" ++ typeString 0 ty ++ concat (map (\ ty -> ", " ++ typeString 0 ty) tys) ++ ")"
+    Syntax.TupleType (ty:tys) -> "(" ++ typeString 0 ty ++ concatMap (\ ty -> ", " ++ typeString 0 ty) tys ++ ")"
     Syntax.UnitType _ -> "()"
     Syntax.UpperType _ q -> pathString q
 

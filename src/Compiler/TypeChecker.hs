@@ -18,7 +18,8 @@ module Compiler.TypeChecker where
 import           Control.Monad   (MonadPlus, mzero)
 import           Data.IntMap     (IntMap)
 import qualified Data.IntMap     as IntMap
-import           Data.List       (intersperse)
+import           Data.List       (intercalate)
+import           Data.Maybe      (fromMaybe)
 
 import qualified Compiler.Syntax as Syntax
 import qualified Compiler.Type   as Type
@@ -149,7 +150,7 @@ concreteName s (Type.Name x tys) = Type.Name x (map (concreteType s) tys)
 concreteType :: Sigma -> Type.Type -> Type.Type
 
 concreteType s (Type.Arrow t1 t2)    = Type.Arrow (concreteType s t1) (concreteType s t2)
-concreteType s (Type.Metavariable x) = maybe Type.Unit id (sigmaLookup s x)
+concreteType s (Type.Metavariable x) = fromMaybe Type.Unit (sigmaLookup s x)
 concreteType s Type.String           = Type.String
 concreteType s (Type.Tuple ts)       = Type.Tuple (map (concreteType s) ts)
 concreteType s Type.Unit             = Type.Unit
@@ -174,7 +175,7 @@ isConcreteType (Type.Variant q)      = all (\ (Type.Name x tys) -> all isConcret
 updateType :: Sigma -> Type.Type -> Type.Type
 
 updateType s (Type.Arrow t1 t2)    = Type.Arrow (updateType s t1) (updateType s t2)
-updateType s (Type.Metavariable x) = maybe (Type.Metavariable x) id (sigmaLookup s x)
+updateType s (Type.Metavariable x) = fromMaybe (Type.Metavariable x) (sigmaLookup s x)
 updateType s Type.String           = Type.String
 updateType s (Type.Tuple ts)       = Type.Tuple (map (updateType s) ts)
 updateType s Type.Unit             = Type.Unit
@@ -198,7 +199,7 @@ typeCheckPat s ty (Syntax.TuplePat pos tys ps) =
       case typeCheckPats s tys ps of
         Left msg -> Left msg
         Right s -> Right s
-    Just (_, s) -> unreachable
+    Just (_, s) -> unreachable "typeCheckPat"
 
 typeCheckPat s ty Syntax.UnderbarPat =
   Right s
@@ -223,7 +224,7 @@ typeCheckPats s (ty:tys) (p:ps) =
     Left msg -> Left msg
     Right s -> typeCheckPats s tys ps
 
-typeCheckPats s _ _ = unreachable
+typeCheckPats s _ _ = unreachable "typeCheckPats"
 
 
 -- We pass in an expected type forward to catch type errors as soon as possible.
@@ -293,13 +294,13 @@ typeCheckTerm g s ty (Syntax.StringTerm p x) =
   case unify s ty Type.String of
     Nothing -> errorMsg s p ty Type.String
     Just (Type.String, s) -> Right s
-    Just _ -> unreachable
+    Just _ -> unreachable "typeCheckTerm"
 
 typeCheckTerm g s ty (Syntax.TupleTerm p ms xs) =
   case unify s ty (Type.Tuple ms) of
     Nothing -> errorMsg s p ty (Type.Tuple ms)
     Just (Type.Tuple tys, s) -> typeCheckTerms g s tys xs
-    Just _ -> unreachable
+    Just _ -> unreachable "typeCheckTerm"
 
 typeCheckTerm g s t (Syntax.UnitTerm p) =
   case unify s t Type.Unit of
@@ -326,7 +327,7 @@ typeCheckTerms g s (ty:tys) (x:xs) =
     Left msg -> Left msg
     Right s -> typeCheckTerms g s tys xs
 
-typeCheckTerms g s _ _ = unreachable
+typeCheckTerms g s _ _ = unreachable "typeCheckTerms"
 
 
 errorMsg :: Sigma -> Syntax.Pos -> Type.Type -> Type.Type -> Either String a
@@ -365,7 +366,7 @@ showType r (Type.Metavariable x) = f 0 r
 showType r Type.String = ("String", r)
 
 showType r (Type.Tuple ts) =
-  ("(" ++ concat (intersperse ", " xs) ++ ")", r')
+  ("(" ++ intercalate ", " xs ++ ")", r')
   where (xs, r') = showTypes r ts
 
 showType r Type.Unit = ("()", r)
@@ -395,7 +396,7 @@ showTypes r (t:ts) = let (s, r') = showType r t
                       in (s:ss, r'')
 
 showQual :: [String] -> String
-showQual = concat . intersperse "."
+showQual = intercalate "."
 
 
 -- Attempts to unify two types, returning the new type. Two equal concrete types
@@ -524,8 +525,8 @@ gammaBind :: Gamma -> String -> Type.Type -> Gamma
 gammaBind g x ty = (x, ty) : g
 
 gammaGet :: Gamma -> String -> Type.Type
-gammaGet g x = maybe (error "Compiler.TypeChecker.gammaGet") id (lookup x g)
+gammaGet g x = fromMaybe (error "Compiler.TypeChecker.gammaGet") (lookup x g)
 
 
-unreachable :: a
-unreachable = error "unreachable"
+unreachable :: String -> a
+unreachable s = error $ "unreachable: TypeChecker." ++ s

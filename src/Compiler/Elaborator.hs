@@ -1,6 +1,6 @@
 module Compiler.Elaborator where
 
-import           Control.Monad   (liftM, liftM2)
+import           Control.Monad   (liftM, liftM2, (<=<), mplus)
 import qualified Data.IntMap     as IdentMap
 import           Data.Map        (Map)
 import qualified Data.Map        as Map
@@ -23,7 +23,7 @@ type IdentMap = IdentMap.IntMap
 -- elaborated, which will in turn add more work to the work queue and so on.
 elaborate :: Syntax.Program -> Simple.Program
 elaborate p = run $ do
-  d <- getFun $ Path [(Name "Main" [])]
+  d <- getFun $ Path [Name "Main" []]
   finish p
   x1 <- get programTags
   x2 <- get programSums
@@ -202,7 +202,7 @@ hasSumWithName :: Simple.Ident -> Name -> Syntax.Dec -> Maybe (M ())
 hasSumWithName d (Name s1 ty1s) dec =
   case dec of
     Syntax.SumDec _ q s2 _ cs | s1 == s2 -> Just $ do
-      tyss <- mapM (\ (_, tys, _, _) -> mapM (\ ty -> elaborateType =<< groundType ty) tys) cs
+      tyss <- mapM (\ (_, tys, _, _) -> mapM (elaborateType <=< groundType) tys) cs
       addSum d (Simple.Sum tyss)
     _ -> Nothing
 
@@ -564,7 +564,7 @@ groundType ty =
 
 search :: (a -> Maybe b) -> [a] -> Maybe b
 search f [] = Nothing
-search f (x:xs) = maybe (search f xs) Just (f x)
+search f (x:xs) = mplus (search f xs) (f x)
 
 todo :: String -> a
 todo s = error $ "todo: Elaborator." ++ s

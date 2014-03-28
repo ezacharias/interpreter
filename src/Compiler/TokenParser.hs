@@ -32,10 +32,10 @@ envWith (Env ss1) ss2 = Env (ss2 ++ ss1)
 patLocals :: Syntax.Pat -> [String]
 patLocals (Syntax.AscribePat _ _ p _)    = patLocals p
 patLocals (Syntax.LowerPat _ s)          = [s]
-patLocals (Syntax.TuplePat _ _ ps)       = concat (map patLocals ps)
+patLocals (Syntax.TuplePat _ _ ps)       = concatMap patLocals ps
 patLocals Syntax.UnderbarPat             = []
 patLocals (Syntax.UnitPat _)             = []
-patLocals (Syntax.UpperPat _ _ _ _ _ ps) = concat (map patLocals ps)
+patLocals (Syntax.UpperPat _ _ _ _ _ ps) = concatMap patLocals ps
 
 withPatLocals :: Syntax.Pat -> AmbiguousParser a -> AmbiguousParser a
 withPatLocals pat p = do
@@ -45,7 +45,7 @@ withPatLocals pat p = do
 
 withPatsLocals :: [Syntax.Pat] -> AmbiguousParser a -> AmbiguousParser a
 withPatsLocals pats p = do
-  let ss = concat (map patLocals pats)
+  let ss = concatMap patLocals pats
   r <- localEnv
   withLocalEnv (envWith r ss) p
 
@@ -240,7 +240,7 @@ keyword s1 = do
   r <- localEnv
   x <- token
   case x of
-    LowerToken s2 | s1 == s2 && not (elem s1 (envVal r)) -> return ()
+    LowerToken s2 | s1 == s2 && notElem s1 (envVal r) -> return ()
     _ -> failurePos pos
 
 typeArguments :: AmbiguousParser [Syntax.Type]
