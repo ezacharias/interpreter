@@ -1,19 +1,19 @@
 The minimial program.
 
 
-    sum Bool
-      False
-      True
+    sum Maybe⟦a⟧
+      Nothing
+      Something(a)
 
     Main : Output
       IO.With(F)
 
     F() : Output
-      bind s to case True
-        True
-          "T"
-        False
-          "F"
+      bind s to case Something("A")
+        Nothing
+          "N"
+        Something(x)
+          x
       IO.Print(s)
       IO.Print("Bye")
       Exit

@@ -202,9 +202,10 @@ hasFunWithName d (Name s1 ty1s) dec =
 hasSumWithName :: Simple.Ident -> Name -> Syntax.Dec -> Maybe (M ())
 hasSumWithName d (Name s1 ty1s) dec =
   case dec of
-    Syntax.SumDec _ q s2 _ cs | s1 == s2 -> Just $ do
-      tyss <- mapM (\ (_, tys, _, _) -> mapM (elaborateType <=< groundType) tys) cs
-      addSum d (Simple.Sum tyss)
+    Syntax.SumDec _ q s2 vs cs | s1 == s2 -> Just $ do
+      withTypeVariables (zip vs ty1s) $ do
+        tyss <- mapM (\ (_, tys, _, _) -> mapM (elaborateType <=< groundType) tys) cs
+        addSum d (Simple.Sum tyss)
     _ -> Nothing
 
 primitiveContinue :: Int -> M ()

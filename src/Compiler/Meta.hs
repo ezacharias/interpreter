@@ -70,8 +70,9 @@ updateDec dec =
     Syntax.SumDec pos _ s vs cs -> do
       q <- getEnvIndirectPath
       let q' = Type.pathAddName q (Type.Name s (map Type.Variable vs))
-      cs <- mapM updateConstructor cs
-      return $ Syntax.SumDec pos q' s vs cs
+      withEnvAddTypeParameters vs $ do
+        cs <- mapM updateConstructor cs
+        return $ Syntax.SumDec pos q' s vs cs
     Syntax.UnitDec pos s vs decs -> do
       n  <- return $ Type.Name s (map Type.Variable vs)
       q1 <- getEnvDirectPath
