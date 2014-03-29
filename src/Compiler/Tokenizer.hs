@@ -105,7 +105,7 @@ tok pos = TokenizerCharRequest check
                   = lower (colSucc pos) pos [c]
         test c | 'A' <= c && c <= 'Z'
                   = upper (colSucc pos) pos [c]
-        test '"'  = string (colSucc pos) pos []
+        test '“'  = string (colSucc pos) pos 0 []
         test _    = TokenizerError pos
 
 dash :: Position -> Tokenizer
@@ -174,12 +174,14 @@ dotUpper pos' pos cs = TokenizerCharRequest check
         test c    = TokenizerToken pos (DotUpperToken (reverse cs)) (present c $ tok pos')
 
 -- This should test to make sure only valid characters are within a string
--- literal. It should also handle escapes correctly. Do we want to use fancy
--- quotes or perhaps French or Japanese quotes?
+-- literal. It should also handle escapes correctly. The integer is the
+-- nesting level.
 
-string :: Position -> Position -> ReversedString -> Tokenizer
-string pos' pos cs = TokenizerCharRequest check
-  where check Nothing = TokenizerError pos
-        check (Just c) = test c
-        test c | c == '"' = TokenizerToken pos (StringToken (reverse cs)) (tok (colSucc pos'))
-        test c            = string (colSucc pos') pos (c:cs)
+string :: Position -> Position -> Int -> ReversedString -> Tokenizer
+string pos' pos n cs = TokenizerCharRequest (check n)
+  where check n Nothing = TokenizerError pos
+        check n (Just c) = test n c
+        test n c | c == '“' = string (colSucc pos') pos (n + 1) (c:cs)
+        test 0 c | c == '”' = TokenizerToken pos (StringToken (reverse cs)) (tok (colSucc pos'))
+        test n c | c == '”' = string (colSucc pos') pos (n - 1) (c:cs)
+        test n c            = string (colSucc pos') pos n (c:cs)

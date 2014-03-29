@@ -12,15 +12,15 @@ The minimial program.
       IO.With(F)
 
     F() : Output
-      bind s to case Something(Something("Hi"))
+      bind s to case Something(Something(“Hi”))
         Something(Nothing)
-          "A"
+          “A”
         Nothing
-          "B"
+          “B”
         Something(Something(x))
           Foo(Only(x))
       IO.Print(s)
-      IO.Print("Bye")
+      IO.Print(“B“Bye”ye”)
       Exit
 
     Foo(x : Only⟦String⟧) : String
