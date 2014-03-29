@@ -187,11 +187,11 @@ updatePat p =
       return Syntax.UnderbarPat
     Syntax.UnitPat pos ->
       return $ Syntax.UnitPat pos
-    Syntax.UpperPat pos _ _ _ q ps -> do
+    Syntax.UpperPat pos _ _ _ _ q ps -> do
       q' <- convertPath q
-      (q', tys, ty) <- getCon q'
+      (q', tys, ty, xs) <- getCon q'
       ps <- mapM updatePat ps
-      return $ Syntax.UpperPat pos q' tys ty q ps
+      return $ Syntax.UpperPat pos q' tys ty xs q ps
 
 -- The pattern must be fully typed to use this; i.e. function parameters.
 -- Theoretically, getting an upper pat could require unification, so we don't
@@ -205,7 +205,7 @@ convertPat p =
     Syntax.TuplePat _ _ ps -> liftM Type.Tuple (mapM convertPat ps)
     Syntax.UnderbarPat -> unreachable "getPatType"
     Syntax.UnitPat _ -> return $ Type.Unit
-    Syntax.UpperPat _ _ _ _ q ps -> unreachable "getPatType"
+    Syntax.UpperPat _ _ _ _ _ q ps -> unreachable "getPatType"
 
 convertType :: Syntax.Type -> M Type.Type
 convertType ty = do
@@ -249,7 +249,7 @@ getSum (Type.Path ns) =
         inResolveFields n2s $
           getSumWithField n3
 
-getCon :: Type.Path -> M (Type.Path, [Type.Type], Type.Type)
+getCon :: Type.Path -> M (Type.Path, [Type.Type], Type.Type, [(String, [()])])
 getCon (Type.Path ns) =
   case ns of
     [] ->
@@ -370,7 +370,7 @@ getSumWithName n = do
             Nothing -> withEnv (Env xs) (getSumWithName n)
             Just m -> m
 
-getConWithName :: Type.Name -> M (Type.Path, [Type.Type], Type.Type)
+getConWithName :: Type.Name -> M (Type.Path, [Type.Type], Type.Type, [(String, [()])])
 getConWithName n = do
   Env xs <- getEnv
   case xs of
@@ -486,7 +486,7 @@ hasSumWithName (Type.Name s1 ty1s) dec =
       return $ Type.Variant (Type.pathAddName q (Type.Name s1 ty1s))
     _ -> Nothing
 
-hasConWithName :: Type.Name -> Syntax.Dec -> Maybe (M (Type.Path, [Type.Type], Type.Type))
+hasConWithName :: Type.Name -> Syntax.Dec -> Maybe (M (Type.Path, [Type.Type], Type.Type, [(String, [()])]))
 hasConWithName (Type.Name s1 ty1s) dec =
   case dec of
     Syntax.SumDec _ _ s2 vs cs ->
@@ -499,7 +499,8 @@ hasConWithName (Type.Name s1 ty1s) dec =
               ty2s <- mapM convertType ty2s
               let q2 = Type.pathAddName q (Type.Name s2 ty1s)
               let ty2 = Type.Variant q2
-              return (Type.pathAddName q (Type.Name s3 ty1s), ty2s, ty2)
+              let xs = map (\ (_, _, s, tys) -> (s, map (const ()) tys)) cs
+              return (Type.pathAddName q (Type.Name s3 ty1s), ty2s, ty2, xs)
           has _ = Nothing
        in search has cs
     _ -> Nothing
@@ -535,7 +536,7 @@ hasFunWithName (Type.Name s1 ty1s) dec =
 getSumWithField :: Type.Name -> M Type.Type
 getSumWithField n = getSumWithName n
 
-getConWithField :: Type.Name -> M (Type.Path, [Type.Type], Type.Type)
+getConWithField :: Type.Name -> M (Type.Path, [Type.Type], Type.Type, [(String, [()])])
 getConWithField n = getConWithName n
 
 getFunWithField :: Type.Name -> M (Type.Path, Type.Type)

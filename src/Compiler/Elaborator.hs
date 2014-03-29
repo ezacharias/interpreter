@@ -319,7 +319,7 @@ withPat d pat m =
     Syntax.UnitPat _ ->
       m
     -- Singleton cases are converted to tuples.
-    Syntax.UpperPat _ _ _ _ _ ps -> todo "withPat upper"
+    Syntax.UpperPat _ _ _ _ _ _ ps -> todo "withPat upper"
     {-
       case ps of
         [] -> m
@@ -401,7 +401,7 @@ elaborateTerm t =
 data Pat =
    EmptyPat
  | TuplePat [Pat]
- | CasePat [(Type.Path, [Pat])]
+ | CasePat [(String, [Pat])]
 
 createPatFromRules :: [Syntax.Rule] -> Pat
 createPatFromRules rs = foldl createPat EmptyPat (map fst rs)
@@ -416,19 +416,22 @@ createPat p1 p2 =
     (CasePat _, Syntax.TuplePat _ _ p3s) -> unreachable "createPathFromRule"
     (p1, Syntax.UnderbarPat) -> p1
     (p1, Syntax.UnitPat _) -> p1
-    (EmptyPat, Syntax.UpperPat _ _ _ _ q p2s) -> let xs = [(Type.Path [Type.Name "False" []], []), (Type.Path [Type.Name "True" []], [])]
-                                                  in CasePat (map (\ (q, ys) -> (q, map (const EmptyPat) ys)) xs)
-    (TuplePat p1s, Syntax.UpperPat _ _ _ _ q p2s) -> unreachable "createPat"
-    (CasePat xs, Syntax.UpperPat _ q2 _ _ _ p2s) -> CasePat (map (\ (q1, p1s) -> if q1 == q2 then (q1, zipWith createPat p1s p2s) else (q1, p1s)) xs)
+    (EmptyPat, Syntax.UpperPat _ _ _ _ xs q p2s) -> CasePat (map (\ (q, ys) -> (q, map (const EmptyPat) ys)) xs)
+    (TuplePat p1s, Syntax.UpperPat _ _ _ _ _ q p2s) -> unreachable "createPat"
+    (CasePat xs, Syntax.UpperPat _ q2 _ _ _ _ p2s) -> let s2 = pathNameString q2
+                                                       in CasePat (map (\ (s1, p1s) -> if s1 == s2 then (s1, zipWith createPat p1s p2s) else (s1, p1s)) xs)
+
+pathNameString :: Type.Path -> String
+pathNameString (Type.Path ns) = let Type.Name s _ = last ns in s
 
 generateFromPat :: Simple.Ident -> Pat -> (Val -> M Simple.Term) -> M Simple.Term
 generateFromPat d1 p1 k =
   case p1 of
     CasePat xs -> do
-      zs <- forM xs $ \ (q, p2s) -> do
+      zs <- forM xs $ \ (s, p2s) -> do
         d2s <- mapM (const gen) p2s
         t <- generateFromPats d2s p2s $ \ ys -> do
-          k (ConstructorVal q (zip d2s ys))
+          k (ConstructorVal s (zip d2s ys))
         return (d2s, t)
       return $ Simple.CaseTerm (Simple.VariableTerm d1) zs
     EmptyPat -> do
@@ -445,7 +448,7 @@ generateFromPats _ _ _ = unreachable "generateFromPats"
 
 data Val =
    TupleVal [(Simple.Ident, Val)]
- | ConstructorVal Type.Path [(Simple.Ident, Val)]
+ | ConstructorVal String [(Simple.Ident, Val)]
  | AnyVal
 
 findRule :: (Simple.Ident, Val) -> [(Syntax.Pat, Syntax.Term)] -> M Simple.Term
@@ -471,11 +474,11 @@ reallyTryRule (d, v) p m =
       return $ m
     Syntax.UnitPat _ ->
       return $ m
-    Syntax.UpperPat _ q1 _ _ _ ps ->
+    Syntax.UpperPat _ q1 _ _ _ _ ps ->
       case v of
         TupleVal xs -> unreachable "reallyTryRule"
-        ConstructorVal q2 xs ->
-          if q1 == q2
+        ConstructorVal s2 xs ->
+          if pathNameString q1 == s2
             then reallyTryRules xs ps m
             else mzero
         AnyVal -> unreachable "reallyTryRule"

@@ -159,7 +159,7 @@ reallyCheckPat p =
       return ()
     Syntax.UnitPat pos ->
       return ()
-    Syntax.UpperPat pos _ _ _ q ps -> do
+    Syntax.UpperPat pos _ _ _ _ q ps -> do
       checkIfPathIsValidConstructor q (length ps)
       forM_ ps reallyCheckPat
 

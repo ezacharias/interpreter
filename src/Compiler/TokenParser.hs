@@ -30,12 +30,12 @@ envWith :: Env -> [String] -> Env
 envWith (Env ss1) ss2 = Env (ss2 ++ ss1)
 
 patLocals :: Syntax.Pat -> [String]
-patLocals (Syntax.AscribePat _ _ p _)    = patLocals p
-patLocals (Syntax.LowerPat _ s)          = [s]
-patLocals (Syntax.TuplePat _ _ ps)       = concatMap patLocals ps
-patLocals Syntax.UnderbarPat             = []
-patLocals (Syntax.UnitPat _)             = []
-patLocals (Syntax.UpperPat _ _ _ _ _ ps) = concatMap patLocals ps
+patLocals (Syntax.AscribePat _ _ p _)      = patLocals p
+patLocals (Syntax.LowerPat _ s)            = [s]
+patLocals (Syntax.TuplePat _ _ ps)         = concatMap patLocals ps
+patLocals Syntax.UnderbarPat               = []
+patLocals (Syntax.UnitPat _)               = []
+patLocals (Syntax.UpperPat _ _ _ _ _ _ ps) = concatMap patLocals ps
 
 withPatLocals :: Syntax.Pat -> AmbiguousParser a -> AmbiguousParser a
 withPatLocals pat p = do
@@ -412,7 +412,7 @@ upperPat = do
   pos <- position
   q <- path
   ps <- many pat3
-  return $ Syntax.UpperPat pos (Type.Path []) [] Type.Unit q ps
+  return $ Syntax.UpperPat pos (Type.Path []) [] Type.Unit [] q ps
 
 pat2 :: AmbiguousParser Syntax.Pat
 pat2 =

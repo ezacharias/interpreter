@@ -49,8 +49,8 @@ data Pat = AscribePat Pos Type.Type Pat Type
           -- ^ Metavariables for the types of the elements.
          | UnderbarPat
          | UnitPat Pos
-         | UpperPat Pos Type.Path [Type.Type] Type.Type Path [Pat]
-          -- ^ Full path of the constructor, constructor argument types, constructor return type.
+         | UpperPat Pos Type.Path [Type.Type] Type.Type [(String, [()])] Path [Pat]
+          -- ^ Full path of the constructor, constructor argument types, constructor return type, all constructors.
            deriving (Eq, Show)
 
 data Type = ArrowType Type Type
