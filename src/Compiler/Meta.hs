@@ -37,6 +37,7 @@ updateDec dec =
       withEnvAddTypeParameters vs $ do
         tys' <- mapM convertPat ps
         ty' <- convertType ty
+        ps <- mapM updatePat ps
         t <- updateTerm t
         return $ Syntax.FunDec pos tys' ty' s vs ps ty t
     Syntax.ModDec pos s vs decs -> do
@@ -202,11 +203,11 @@ convertPat :: Syntax.Pat -> M Type.Type
 convertPat p =
   case p of
     Syntax.AscribePat _ _ p ty -> convertType ty
-    Syntax.LowerPat _ x -> unreachable "getPatType"
+    Syntax.LowerPat _ x -> unreachable "convertPat"
     Syntax.TuplePat _ _ ps -> liftM Type.Tuple (mapM convertPat ps)
-    Syntax.UnderbarPat -> unreachable "getPatType"
+    Syntax.UnderbarPat -> unreachable "convertPat"
     Syntax.UnitPat _ -> return $ Type.Unit
-    Syntax.UpperPat _ _ _ _ _ q ps -> unreachable "getPatType"
+    Syntax.UpperPat _ _ _ _ _ q ps -> todo "convertPat: UpperPat"
 
 convertType :: Syntax.Type -> M Type.Type
 convertType ty = do

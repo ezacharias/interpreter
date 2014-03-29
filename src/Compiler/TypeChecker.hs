@@ -41,11 +41,22 @@ inferDec (Syntax.SumDec pos q s ss rs) =
   Right $ Syntax.SumDec pos q s ss rs
 
 -- ty0s and ty0 have been converted in Meta.
-inferDec (Syntax.FunDec pos ty0s ty0 s ss ps ty t) = do
+inferDec (Syntax.FunDec pos ty0s ty0 v vs ps ty t) = do
+  case typeCheckPats sigmaEmpty ty0s ps of
+    Left msg -> Left msg
+    Right s ->
+      case gammaWithPats gammaEmpty s ps ty0s of
+        Left msg -> Left msg
+        Right g ->
+          case inferTerm g s ty0 t of
+            Left msg -> Left msg
+            Right t -> Right $ Syntax.FunDec pos ty0s ty0 v vs ps ty t
+{-
   case inferTerm g sigmaEmpty ty0 t of
     Left msg -> Left msg
-    Right t -> Right $ Syntax.FunDec pos ty0s ty0 s ss ps ty t
-  where g = either (\ _ -> error "impossible") id $ gammaWithPats g sigmaEmpty ps ty0s
+    Right t -> Right $ Syntax.FunDec pos ty0s ty0 v vs ps ty t
+  where g = either (\ _ -> unreachable "inferDec") id $ gammaWithPats gammaEmpty sigmaEmpty ps ty0s
+-}
 
 inferDec (Syntax.ModDec pos s vs ds) =
   case inferDecs ds of
@@ -90,7 +101,7 @@ gammaWithPats g s []     []       = Right g
 gammaWithPats g s (p:ps) (ty:tys) = case gammaWithPat g s p ty of
                                       Left msg -> Left msg
                                       Right g -> gammaWithPats g s ps tys
-gammaWithPats g s _      _        = error "Compiler.TypeChecker.withPats: impossible"
+gammaWithPats g s _      _        = unreachable "gammaWithPats"
 
 
 gammaWithLowerPat :: Gamma -> Sigma -> Syntax.Pos -> String -> Type.Type -> Either String Gamma
@@ -212,7 +223,7 @@ typeCheckPat s ty (Syntax.UnitPat pos) =
 typeCheckPat s ty (Syntax.UpperPat pos q tys ty2 _ x ps) =
   case unify s ty ty2 of
     Nothing -> errorMsg s pos ty ty2
-    Just (ty, s) -> fmap (const s) (typeCheckPats s tys ps)
+    Just (ty, s) -> typeCheckPats s tys ps
 
 
 typeCheckPats :: Sigma -> [Type.Type] -> [Syntax.Pat] -> Either String Sigma

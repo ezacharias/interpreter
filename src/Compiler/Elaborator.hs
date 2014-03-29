@@ -1,21 +1,15 @@
 module Compiler.Elaborator where
 
--- import           Control.Applicative (Alternative, empty, (<|>), pure, (<$))
-import           Control.Monad       (liftM, liftM2, mplus, (<=<), MonadPlus, mzero, msum, forM)
-import qualified Data.IntMap         as IdentMap
-import           Data.Map            (Map)
-import qualified Data.Map            as Map
-import           Data.Maybe          (fromMaybe)
-import           Debug.Trace         (trace)
+import           Control.Monad   (MonadPlus, forM, liftM, liftM2, mplus, msum,
+                                  mzero, (<=<))
+import qualified Data.IntMap     as IdentMap
+import           Data.Map        (Map)
+import qualified Data.Map        as Map
+import           Data.Maybe      (fromMaybe)
 
--- import Debug.Trace (trace)
-
-import qualified Compiler.Simple     as Simple
-import qualified Compiler.Syntax     as Syntax
-import qualified Compiler.Type       as Type
-
-tr :: Show a => a -> a
-tr x = trace (show x) x
+import qualified Compiler.Simple as Simple
+import qualified Compiler.Syntax as Syntax
+import qualified Compiler.Type   as Type
 
 type IdentMap = IdentMap.IntMap
 
@@ -36,8 +30,7 @@ finish :: Syntax.Program -> M ()
 finish p = do
   w <- get work
   case w of
-    [] ->
-      return ()
+    [] -> return ()
     (m : w) -> do
       -- It is necessary to set the work queue before running m because m
       -- may modify the work queue.
@@ -54,6 +47,7 @@ getFun q = do
     Just d -> return d
     Nothing -> do
       d <- gen
+      -- It is necessary to set the exported ident before any further work.
       set (\ s -> s {exportedFuns = Map.insert q d x})
       addWork $ exportFun q d
       return d
@@ -72,6 +66,7 @@ getSum q = do
           return 0
         _ -> do
           d <- gen
+          -- It is necessary to set the exported ident before any further work.
           set (\ s -> s {exportedSums = Map.insert q d x})
           addWork $ exportSum q d
           return d
@@ -83,6 +78,7 @@ getTag q = do
     Just d -> return d
     Nothing -> do
       d <- gen
+      -- It is necessary to set the exported ident before any further work.
       set (\ s -> s {exportedTags = Map.insert q d x})
       return d
 
@@ -143,14 +139,7 @@ hasField p prog (Name s1 ty1s) m dec =
           withTypeVariables (zip vs ty1s) $ do
             ns <- mapM groundName ns
             p2 <- return $ Path ns
-            -- _ <- trace ("3 " ++ show p2) (return ())
-            -- _ <- trace ("4 " ++ show p) (return ())
             withRename (createRename p2 p) $ do
-              {-
-              (ns, n) <- return $ splitPath p2
-              resolveFields (Path []) prog decs ns $ \ p prog decs -> do
-                resolveUnit n p prog decs m
-              -}
               resolveFields (Path []) prog decs ns m
     Syntax.UnitDec _ s2 vs decs | s1 == s2 -> Just $ do
       withTypeVariables (zip vs ty1s) $ do
@@ -319,17 +308,10 @@ withPat d pat m =
       m
     Syntax.UnitPat _ ->
       m
-    -- Singleton cases are converted to tuples.
-    Syntax.UpperPat _ _ _ _ _ _ ps -> todo "withPat upper"
-    {-
-      case ps of
-        [] -> m
-        [p] -> withPat d p m
-        (_:_:_) -> do
-          ds <- mapM (const gen) ps
-          t <- withPats ds ps m
-          return $ Simple.UntupleTerm ds (Simple.VariableTerm d) t todo "withPat"
-    -}
+    Syntax.UpperPat _ _ _ _ _ _ ps -> do
+      ds <- mapM (const gen) ps
+      t <- withPats ds ps m
+      return $ Simple.CaseTerm (Simple.VariableTerm d) [(ds, t)]
 
 withPats :: [Simple.Ident] -> [Syntax.Pat] -> M Simple.Term -> M Simple.Term
 withPats [] [] m = m
@@ -388,9 +370,7 @@ elaborateTerm t =
     Syntax.UnitTerm pos ->
       return $ Simple.UnitTerm
     Syntax.UpperTerm _ q _ _ -> do
-      -- _ <- trace ("1: " ++ show q) (return ())
       q <- groundPath q
-      -- _ <- trace ("2: " ++ show q) (return ())
       d <- getFun q
       return $ Simple.FunTerm d
     Syntax.VariableTerm _ s -> do
@@ -489,49 +469,6 @@ reallyTryRules [] [] m = return m
 reallyTryRules (x:xs) (p:ps) m = reallyTryRule x p =<< reallyTryRules xs ps m
 reallyTryRules _ _ _ = unreachable "reallyTryRules"
 
-
-
-
-
-{-
-data Pat = Pat Simple.Ident Pat1
-
-data Pat1 =
-   TuplePat [Pat]
- | CasePat [[Pat]]
- | NoPat
-
-data Action =
-   CaseAction [Action]
- | DoAction Simple.Term
- | NoAction
-
-bar :: Pat -> Syntax.Pat -> M Simple.Term -> M Simple.Term
-bar (Pat b (TuplePat ps)) (Syntax.TuplePat _ _ p2s) m = bar2 ps p2s m
-bar (Pat b (TuplePat ps)) _ m = todo "bar"
-bar (Pat b (CasePat ps)) _ m = todo "bar"
-bar (Pat b NoPat) (Syntax.LowerPat _ s) m = withLowerBind s b m
-bar (Pat b NoPat) _ m = todo "bar"
-
-bar2 :: [Pat] -> [Syntax.Pat] -> ( -> M Simple.Term) -> M Simple.Term
-bar2 p1s p2s f = bar
-
-foo :: Syntax.Pat -> Pat -> M Pat
-foo (Syntax.AscribePat _ _ p1 _) p2 = foo p1 p2
-foo (Syntax.LowerPat _ _) p2 = return p2
-foo (Syntax.TuplePat _ _ p1s) (Pat d (TuplePat p2s)) = do p3s <- zipWithM foo p1s p2s
-                                                          return $ Pat d (TuplePat p3s)
-foo (Syntax.TuplePat _ _ p1s) (Pat d NoPat) = let f p1 = do d <- gen
-                                                            foo p1 (Pat d NoPat)
-                                               in do p3s <- mapM f p1s
-                                                     return $ Pat d (TuplePat p3s)
-foo (Syntax.TuplePat _ _ _) (Pat d (CasePat _)) = unreachable "foo"
-foo Syntax.UnderbarPat p2 = return p2
-foo (Syntax.UnitPat _) p2 = return p2
- --      | UpperPat Pos Type.Path [Type.Type] Type.Type Path [Pat]
-foo (Syntax.UpperPat _ q _ _ _ p1s) p2 = todo "foo"
--}
-
 -- If the start of the third path matches the first path, replace the start
 -- with the second path. This is used for unit instantiation.
 createRename :: Path -> Path -> (Path -> Path)
@@ -614,7 +551,6 @@ with f m = M (\ o k d -> runM m (f o) k d)
 
 withRename :: (Path -> Path) -> M a -> M a
 withRename f m = with (\ o -> o {renamer = renamer o . f}) m
--- withRename f m = with (\ o -> o {renamer = f}) m
 
 withTypeVariables :: [(String, Type)] -> M a -> M a
 withTypeVariables xs m = with (\ o -> o {typeVariables = xs ++ typeVariables o}) m
@@ -663,9 +599,6 @@ groundType ty =
 
 
 -- Utility Functions
-
--- choice :: Alternative f => [f a] -> f a
--- choice = foldr (<|>) empty
 
 search :: (a -> Maybe b) -> [a] -> Maybe b
 search f [] = Nothing

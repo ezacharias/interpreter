@@ -5,18 +5,28 @@ The minimial program.
       Nothing
       Something(a)
 
+    sum Only⟦a⟧
+      Only(a)
+
     Main : Output
       IO.With(F)
 
     F() : Output
-      bind s to case Something("A")
+      bind s to case Something(Something("Hi"))
+        Something(Nothing)
+          "A"
         Nothing
-          "N"
-        Something(x)
-          x
+          "B"
+        Something(Something(x))
+          Foo(Only(x))
       IO.Print(s)
       IO.Print("Bye")
       Exit
+
+    Foo(x : Only⟦String⟧) : String
+      case x
+        Only(s)
+          s
 
     mod IO
 
