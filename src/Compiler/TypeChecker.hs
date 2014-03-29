@@ -78,7 +78,7 @@ inferDecs (d:ds) =
 gammaWithPat :: Gamma -> Sigma -> Syntax.Pat -> Type.Type -> Either String Gamma
 gammaWithPat g s (Syntax.AscribePat _ _ p _)    ty = gammaWithPat g s p ty
 gammaWithPat g s (Syntax.LowerPat pos n)        ty = gammaWithLowerPat g s pos n ty
-gammaWithPat g s (Syntax.TuplePat _ _ ps)       ty = gammaWithPats g s ps (Type.tupleElems ty)
+gammaWithPat g s (Syntax.TuplePat _ tys ps)     ty = gammaWithPats g s ps tys
 gammaWithPat g s Syntax.UnderbarPat             ty = Right g
 gammaWithPat g s (Syntax.UnitPat _)             ty = Right g
 gammaWithPat g s (Syntax.UpperPat _ _ tys _ _ ps) ty = gammaWithPats g s ps tys

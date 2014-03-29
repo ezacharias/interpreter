@@ -1,17 +1,18 @@
 module Compiler.Elaborator where
 
-import           Control.Monad   (liftM, liftM2, (<=<), mplus)
-import qualified Data.IntMap     as IdentMap
-import           Data.Map        (Map)
-import qualified Data.Map        as Map
-import           Data.Maybe      (fromMaybe)
-import Debug.Trace (trace)
+-- import           Control.Applicative (Alternative, empty, (<|>), pure, (<$))
+import           Control.Monad       (liftM, liftM2, mplus, (<=<), MonadPlus, mzero, msum, forM)
+import qualified Data.IntMap         as IdentMap
+import           Data.Map            (Map)
+import qualified Data.Map            as Map
+import           Data.Maybe          (fromMaybe)
+import           Debug.Trace         (trace)
 
 -- import Debug.Trace (trace)
 
-import qualified Compiler.Simple as Simple
-import qualified Compiler.Syntax as Syntax
-import qualified Compiler.Type   as Type
+import qualified Compiler.Simple     as Simple
+import qualified Compiler.Syntax     as Syntax
+import qualified Compiler.Type       as Type
 
 tr :: Show a => a -> a
 tr x = trace (show x) x
@@ -361,8 +362,12 @@ elaborateTerm t =
       t1 <- elaborateTerm t1
       t2 <- withPat d p (elaborateTerm t2)
       return $ Simple.BindTerm d t1 t2
-    Syntax.CaseTerm _ t rs ->
-      todo "elaborateTerm CaseTerm"
+    Syntax.CaseTerm _ t1 rs -> do
+      p <- return $ createPatFromRules rs
+      d <- gen
+      t1 <- elaborateTerm t1
+      t2 <- generateFromPat d p (\ v -> findRule (d, v) rs)
+      return $ Simple.BindTerm d t1 t2
     Syntax.ForTerm ty1s ty2 ps t1 t2 -> do
       t1 <- elaborateTerm t1
       ty1s <- mapM groundType ty1s
@@ -391,6 +396,99 @@ elaborateTerm t =
       d <- getLowerBind s
       return $ Simple.VariableTerm d
 
+
+
+data Pat =
+   EmptyPat
+ | TuplePat [Pat]
+ | CasePat [(Type.Path, [Pat])]
+
+createPatFromRules :: [Syntax.Rule] -> Pat
+createPatFromRules rs = foldl createPat EmptyPat (map fst rs)
+
+createPat :: Pat -> Syntax.Pat -> Pat
+createPat p1 p2 =
+  case (p1, p2) of
+    (p1, Syntax.AscribePat _ _ p2 _) -> createPat p1 p2
+    (p1, Syntax.LowerPat _ _) -> p1
+    (EmptyPat, Syntax.TuplePat _ _ p2s) -> TuplePat (map (createPat EmptyPat) p2s)
+    (TuplePat p1s, Syntax.TuplePat _ _ p2s) -> TuplePat (zipWith createPat p1s p2s)
+    (CasePat _, Syntax.TuplePat _ _ p3s) -> unreachable "createPathFromRule"
+    (p1, Syntax.UnderbarPat) -> p1
+    (p1, Syntax.UnitPat _) -> p1
+    (EmptyPat, Syntax.UpperPat _ _ _ _ q p2s) -> let xs = [(Type.Path [Type.Name "False" []], []), (Type.Path [Type.Name "True" []], [])]
+                                                  in CasePat (map (\ (q, ys) -> (q, map (const EmptyPat) ys)) xs)
+    (TuplePat p1s, Syntax.UpperPat _ _ _ _ q p2s) -> unreachable "createPat"
+    (CasePat xs, Syntax.UpperPat _ q2 _ _ _ p2s) -> CasePat (map (\ (q1, p1s) -> if q1 == q2 then (q1, zipWith createPat p1s p2s) else (q1, p1s)) xs)
+
+generateFromPat :: Simple.Ident -> Pat -> (Val -> M Simple.Term) -> M Simple.Term
+generateFromPat d1 p1 k =
+  case p1 of
+    CasePat xs -> do
+      zs <- forM xs $ \ (q, p2s) -> do
+        d2s <- mapM (const gen) p2s
+        t <- generateFromPats d2s p2s $ \ ys -> do
+          k (ConstructorVal q (zip d2s ys))
+        return (d2s, t)
+      return $ Simple.CaseTerm (Simple.VariableTerm d1) zs
+    EmptyPat -> do
+      k AnyVal
+    TuplePat p2s -> do
+      d2s <- mapM (const gen) p2s
+      t <- generateFromPats d2s p2s (\ xs -> k (TupleVal (zip d2s xs)))
+      return $ Simple.UntupleTerm d2s (Simple.VariableTerm d1) t
+
+generateFromPats :: [Simple.Ident] -> [Pat] -> ([Val] -> M Simple.Term) -> M Simple.Term
+generateFromPats [] [] k = k []
+generateFromPats (d:ds) (p:ps) k = generateFromPat d p (\ x -> generateFromPats ds ps (\ xs -> k (x:xs)))
+generateFromPats _ _ _ = unreachable "generateFromPats"
+
+data Val =
+   TupleVal [(Simple.Ident, Val)]
+ | ConstructorVal Type.Path [(Simple.Ident, Val)]
+ | AnyVal
+
+findRule :: (Simple.Ident, Val) -> [(Syntax.Pat, Syntax.Term)] -> M Simple.Term
+findRule x rs = fromMaybe (unreachable "findRule") $ msum $ map (tryRule x) rs
+
+-- Returns the elaborated body of the rule if the pattern matches the Val.
+tryRule :: MonadPlus m => (Simple.Ident, Val) -> (Syntax.Pat, Syntax.Term) -> m (M Simple.Term)
+tryRule x (p, t) = reallyTryRule x p (elaborateTerm t)
+
+reallyTryRule :: MonadPlus m => (Simple.Ident, Val) -> Syntax.Pat -> M Simple.Term -> m (M Simple.Term)
+reallyTryRule (d, v) p m =
+  case p of
+    Syntax.AscribePat _ _ p _ ->
+      reallyTryRule (d, v) p m
+    Syntax.LowerPat _ s ->
+      return $ withLowerBind s d m
+    Syntax.TuplePat _ _ ps ->
+      case v of
+        TupleVal xs -> reallyTryRules xs ps m
+        ConstructorVal _ _ -> unreachable "reallyTryRule"
+        AnyVal -> unreachable "reallyTryRule"
+    Syntax.UnderbarPat ->
+      return $ m
+    Syntax.UnitPat _ ->
+      return $ m
+    Syntax.UpperPat _ q1 _ _ _ ps ->
+      case v of
+        TupleVal xs -> unreachable "reallyTryRule"
+        ConstructorVal q2 xs ->
+          if q1 == q2
+            then reallyTryRules xs ps m
+            else mzero
+        AnyVal -> unreachable "reallyTryRule"
+
+reallyTryRules :: MonadPlus m => [(Simple.Ident, Val)] -> [Syntax.Pat] -> M Simple.Term -> m (M Simple.Term)
+reallyTryRules [] [] m = return m
+reallyTryRules (x:xs) (p:ps) m = reallyTryRule x p =<< reallyTryRules xs ps m
+reallyTryRules _ _ _ = unreachable "reallyTryRules"
+
+
+
+
+
 {-
 data Pat = Pat Simple.Ident Pat1
 
@@ -412,7 +510,7 @@ bar (Pat b NoPat) (Syntax.LowerPat _ s) m = withLowerBind s b m
 bar (Pat b NoPat) _ m = todo "bar"
 
 bar2 :: [Pat] -> [Syntax.Pat] -> ( -> M Simple.Term) -> M Simple.Term
-bar2 p1s p2s f = bar 
+bar2 p1s p2s f = bar
 
 foo :: Syntax.Pat -> Pat -> M Pat
 foo (Syntax.AscribePat _ _ p1 _) p2 = foo p1 p2
@@ -458,20 +556,20 @@ addSum d x = do
 newtype M a = M { runM :: Look -> (a -> State -> Simple.Program) -> State -> Simple.Program }
 
 data State = State
- { work :: [Syntax.Program -> M ()]
- , ident :: Simple.Ident
+ { work         :: [Syntax.Program -> M ()]
+ , ident        :: Simple.Ident
  , exportedTags :: Map Path Simple.Ident
  , exportedSums :: Map Path Simple.Ident
  , exportedFuns :: Map Path Simple.Ident
- , programTags :: Simple.IdentMap Simple.Tag
- , programSums :: Simple.IdentMap Simple.Sum
- , programFuns :: Simple.IdentMap Simple.Fun
+ , programTags  :: Simple.IdentMap Simple.Tag
+ , programSums  :: Simple.IdentMap Simple.Sum
+ , programFuns  :: Simple.IdentMap Simple.Fun
  }
 
 data Look = Look
- { typeVariables :: [(String, Type)]
+ { typeVariables  :: [(String, Type)]
  , valueVariables :: [(String, Simple.Ident)]
- , renamer :: Path -> Path
+ , renamer        :: Path -> Path
  }
 
 instance Monad M where
@@ -561,6 +659,9 @@ groundType ty =
 
 
 -- Utility Functions
+
+-- choice :: Alternative f => [f a] -> f a
+-- choice = foldr (<|>) empty
 
 search :: (a -> Maybe b) -> [a] -> Maybe b
 search f [] = Nothing

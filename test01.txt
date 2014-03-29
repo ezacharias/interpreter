@@ -1,11 +1,20 @@
 The minimial program.
 
 
+    sum Bool
+      False
+      True
+
     Main : Output
       IO.With(F)
 
     F() : Output
-      IO.Print("Hello")
+      bind s to case True
+        True
+          "T"
+        False
+          "F"
+      IO.Print(s)
       IO.Print("Bye")
       Exit
 
