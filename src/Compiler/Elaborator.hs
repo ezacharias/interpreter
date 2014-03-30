@@ -64,6 +64,11 @@ getSum q = do
         Path [Name "Output" []] -> do
           set (\ s -> s {exportedSums = Map.insert q 0 x})
           return 0
+        -- We need to do more here.
+        Path [Name "Stream" [ty1, ty2, ty3]] -> do
+          d <- gen
+          set (\ s -> s {exportedSums = Map.insert q d x})
+          return d
         _ -> do
           d <- gen
           -- It is necessary to set the exported ident before any further work.
@@ -88,6 +93,8 @@ exportFun :: Path -> Simple.Ident -> Syntax.Program -> M ()
 exportFun (Path [Name "Continue" []]) d prog = primitiveContinue d
 exportFun (Path [Name "Exit" []]) d prog = primitiveExit d
 exportFun (Path [Name "Write" []]) d prog = primitiveWrite d
+exportFun (Path [Name "End" [ty1, ty2, ty3]]) d prog = primitiveEnd ty1 ty2 ty3 d
+exportFun (Path [Name "Next" [ty1, ty2, ty3]]) d prog = primitiveNext ty1 ty2 ty3 d
 exportFun (Path [Name "Unreachable" [ty]]) d prog = primitiveUnreachable ty d
 exportFun p d prog = do
   let (ns, n) = splitPath p
@@ -222,48 +229,57 @@ primitiveWrite d1 = do
                   (Simple.LambdaTerm d3 (Simple.SumType 0)
                     (Simple.ConstructorTerm 0 1 [Simple.VariableTerm d2, Simple.VariableTerm d3])))
 
+primitiveEnd :: Type -> Type -> Type -> Int -> M ()
+primitiveEnd ty1 ty2 ty3 d1 = do
+  d2 <- getSum (Path [Name "Stream" [ty1, ty2, ty3]])
+  d3 <- gen
+  ty3 <- elaborateType ty3
+  addFun d1 $ Simple.Fun (Simple.ArrowType ty3 (Simple.SumType d2))
+                (Simple.LambdaTerm d3 ty3
+                  (Simple.ConstructorTerm d2 0 [Simple.VariableTerm d3]))
+
+primitiveNext :: Type -> Type -> Type -> Int -> M ()
+primitiveNext ty1 ty2 ty3 d1 = do
+  d2 <- getSum (Path [Name "Stream" [ty1, ty2, ty3]])
+  d3 <- gen
+  d4 <- gen
+  ty1 <- elaborateType ty1
+  ty2 <- elaborateType ty2
+  addFun d1 $ Simple.Fun (Simple.ArrowType ty1
+                                           (Simple.ArrowType (Simple.ArrowType ty2 (Simple.SumType d2))
+                                                             (Simple.SumType d2)))
+                (Simple.LambdaTerm d3 ty1
+                  (Simple.LambdaTerm d4 (Simple.ArrowType ty2 (Simple.SumType d2))
+                    (Simple.ConstructorTerm d2 1 [Simple.VariableTerm d3, Simple.VariableTerm d4])))
+
 primitiveUnreachable :: Type -> Int -> M ()
 primitiveUnreachable ty d = do
   ty <- elaborateType ty
   addFun d $ Simple.Fun ty (Simple.UnreachableTerm ty)
 
 primitiveThrow :: Int -> Int -> M ()
-primitiveThrow d2 d = do
-  d3 <- gen
+primitiveThrow tag d = do
+  d2 <- gen
   ty1 <- getTypeVariable "a"
   ty1 <- elaborateType ty1
   ty2 <- getTypeVariable "b"
   ty2 <- elaborateType ty2
   addFun d $ Simple.Fun (Simple.ArrowType ty1 ty2)
-               (Simple.LambdaTerm d3 ty1
-                 (Simple.ThrowTerm d2 (Simple.VariableTerm d3)))
+               (Simple.LambdaTerm d2 ty1
+                 (Simple.ThrowTerm tag (Simple.VariableTerm d2)))
 
 primitiveCatch :: Int -> Int -> Type -> M ()
 primitiveCatch tag d ty3 = do
-  d2 <- gen
-  d3 <- gen
-  d4 <- gen
-  d5 <- gen
   ty1 <- getTypeVariable "a"
-  ty1 <- elaborateType ty1
   ty2 <- getTypeVariable "b"
-  ty2 <- elaborateType ty2
+  d2 <- getSum (Path [Name "Stream" [ty1, ty2, ty3]])
+  d3 <- gen
   ty3 <- elaborateType ty3
   addFun d $ Simple.Fun (Simple.ArrowType (Simple.ArrowType Simple.UnitType ty3)
-                                          (Simple.ArrowType (Simple.ArrowType ty1
-                                                                              (Simple.ArrowType (Simple.ArrowType ty2 ty3)
-                                                                                                ty3))
-                                                            ty3))
-                      (Simple.LambdaTerm d2 (Simple.ArrowType Simple.UnitType ty3)
-                        (Simple.LambdaTerm d3 (Simple.ArrowType ty1
-                                                                (Simple.ArrowType (Simple.ArrowType ty2 ty3)
-                                                                                  ty3))
-                          (Simple.CatchTerm tag
-                            (Simple.ApplyTerm (Simple.VariableTerm d2) Simple.UnitTerm)
-                            d4 d5
-                            (Simple.ApplyTerm (Simple.ApplyTerm (Simple.VariableTerm d3)
-                                                                (Simple.VariableTerm d4))
-                                              (Simple.VariableTerm d5)))))
+                                          (Simple.SumType d2))
+               (Simple.LambdaTerm d3 (Simple.ArrowType Simple.UnitType ty3)
+                 (Simple.CatchTerm tag d2
+                   (Simple.ApplyTerm (Simple.VariableTerm d3) Simple.UnitTerm)))
 
 elaborateType :: Type -> M Simple.Type
 elaborateType ty = do

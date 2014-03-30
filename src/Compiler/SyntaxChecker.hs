@@ -339,6 +339,20 @@ reallyCheckPath r names decs =
               checkArity name []
             [name@(FunName, NameFocus, _, "Unreachable", _)] ->
               checkArity name [()]
+            [name@(TypeName, NameFocus, _, "Stream", _)] ->
+              checkArity name [(), (), ()]
+            [name@(FunName, NameFocus, _, "End", _)] ->
+              checkArity name [(), (), ()]
+            [name@(ConName n, NameFocus, pos, "End", _)] -> do
+              unless (n == 1) $
+                syntaxErrorLineCol pos $ "Incorrect number of arguments for constructor End."
+              checkArity name [(), (), ()]
+            [name@(FunName, NameFocus, _, "Next", _)] ->
+              checkArity name [(), (), ()]
+            [name@(ConName n, NameFocus, pos, "Next", _)] -> do
+              unless (n == 2) $
+                syntaxErrorLineCol pos $ "Incorrect number of arguments for constructor Next."
+              checkArity name [(), (), ()]
             [name@(UnitName, NameFocus, _, "Escape", _)] ->
               checkArity name [(), ()]
             [name1@(UnitName, NameFocus, _, "Escape", _), name2@(FunName, FieldFocus, _, "Catch", _)] -> do

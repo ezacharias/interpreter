@@ -51,11 +51,10 @@ data Type =
 --
 -- Binds a variable to a value in the final term.
 --
---   CatchTerm tag term1 var1 var2 term2
+--   CatchTerm tag ident term
 --
--- Evaluates term1. If it escapes with tag, the argument to Escape is bound to
--- var1 while the delimited continuation is bound to var2, and term2 is
--- evaluated. If it does not escape, term2 is not evaluated.
+-- Evaluates term. Returns a stream of type ident. If it escapes with tag,
+-- returns Next. Otherwise returns End.
 --
 --   ConcatenateTerm
 --
@@ -105,7 +104,7 @@ data Term =
    ApplyTerm Term Term
  | BindTerm Ident Term Term
  | CaseTerm Term [([Ident], Term)]
- | CatchTerm Ident Term Ident Ident Term
+ | CatchTerm Ident Ident Term
  | ConcatenateTerm Term Term
  | ConstructorTerm Ident Index [Term]
  | FunTerm Ident

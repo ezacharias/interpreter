@@ -148,6 +148,37 @@ updateTerm t =
                                  (Type.Arrow (Type.Variant (Type.Path [Type.Name "Output" []]))
                                              (Type.Variant (Type.Path [Type.Name "Output" []]))))
                      [(pos, "Write", [])]
+        [(pos, "End", tys)] -> do
+          (ty1, ty2, ty3) <- case tys of
+            [] -> do ty1' <- gen
+                     ty2' <- gen
+                     ty3' <- gen
+                     return (ty1', ty2', ty3')
+            [ty1, ty2, ty3] -> do ty1' <- convertType ty1
+                                  ty2' <- convertType ty2
+                                  ty3' <- convertType ty3
+                                  return (ty1', ty2', ty3')
+            _ -> unreachable "updateTerm"
+          return $ Syntax.UpperTerm pos (Type.Path [Type.Name "End" [ty1, ty2, ty3]])
+                     (Type.Arrow ty3 (Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]])))
+                     [(pos, "End", tys)]
+        [(pos, "Next", tys)] -> do
+          (ty1, ty2, ty3) <- case tys of
+            [] -> do ty1' <- gen
+                     ty2' <- gen
+                     ty3' <- gen
+                     return (ty1', ty2', ty3')
+            [ty1, ty2, ty3] -> do ty1' <- convertType ty1
+                                  ty2' <- convertType ty2
+                                  ty3' <- convertType ty3
+                                  return (ty1', ty2', ty3')
+            _ -> unreachable "updateTerm"
+          return $ Syntax.UpperTerm pos (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]])
+                     (Type.Arrow ty1
+                                 (Type.Arrow (Type.Arrow ty2
+                                                         (Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]])))
+                                             (Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]]))))
+                     [(pos, "Stream", tys)]
         [(pos, "Unreachable", tys)] -> do
           ty' <- case tys of
             [] -> gen
@@ -363,6 +394,8 @@ getSumWithName n = do
           return Type.String
         Type.Name "Output" [] ->
           return $ Type.Variant (Type.Path [Type.Name "Output" []])
+        Type.Name "Stream" [ty1, ty2, ty3] ->
+          return $ Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]])
         _ ->
           unreachable "getSumWithName 2"
     (x:xs) ->
@@ -378,6 +411,40 @@ getConWithName n = do
   case xs of
     [] ->
       case n of
+        (Type.Name "End" []) -> do
+          ty1 <- gen
+          ty2 <- gen
+          ty3 <- gen
+          return ( Type.Path [Type.Name "End" [ty1, ty2, ty3]]
+                 , [ty3]
+                 , Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]])
+                 , [ ("End", [()])
+                   , ("Next", [(), ()])]
+                 )
+        (Type.Name "End" [ty1, ty2, ty3]) -> do
+          return ( Type.Path [Type.Name "End" [ty1, ty2, ty3]]
+                 , [ty3]
+                 , Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]])
+                 , [ ("End", [()])
+                   , ("Next", [(), ()])]
+                 )
+        (Type.Name "Next" []) -> do
+          ty1 <- gen
+          ty2 <- gen
+          ty3 <- gen
+          return ( Type.Path [Type.Name "Next" [ty1, ty2, ty3]]
+                 , [ty1, Type.Arrow ty2 (Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]]))]
+                 , Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]])
+                 , [ ("End", [()])
+                   , ("Next", [(), ()])]
+                 )
+        (Type.Name "Next" [ty1, ty2, ty3]) -> do
+          return ( Type.Path [Type.Name "Next" [ty1, ty2, ty3]]
+                 , [ty1, Type.Arrow ty2 (Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]]))]
+                 , Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]])
+                 , [ ("End", [()])
+                   , ("Next", [(), ()])]
+                 )
         _ ->
           unreachable "getConWithName"
     (x:xs) ->
@@ -407,11 +474,7 @@ getFunWithName n = do
                 _ -> gen
               return (Type.pathAddName q (Type.Name "Catch" [ty3]),
                       Type.Arrow (Type.Arrow Type.Unit ty3)
-                                 (Type.Arrow (Type.Arrow ty1
-                                                         (Type.Arrow (Type.Arrow ty2
-                                                                                 ty3)
-                                                                     ty3))
-                                             ty3))
+                                 (Type.Variant (Type.Path [Type.Name "Stream" [ty1, ty2, ty3]])))
             _ -> unreachable "getFunWithName Escape"
         (_, _ , _, decs) ->
           case search (hasFunWithName n) decs of

@@ -56,8 +56,8 @@ eval t =
       v <- eval t1
       let (ds, t2) = rs !! constructorIndex v
       bind (zip ds (constructorValues v)) (eval t2)
-    CatchTerm d1 t1 d2 d3 t2 ->
-      catch d1 (eval t1) (\ v1 v2 -> bind [(d2, v1), (d3, v2)] (eval t2))
+    CatchTerm d1 _ t1 ->
+      catch d1 (eval t1)
     ConcatenateTerm t1 t2 -> do
       v1 <- eval t1
       v2 <- eval t2
@@ -134,14 +134,14 @@ run g m = runM m g emptyEnv emptyK2 (emptyK1 g)
 throw :: Ident -> Value -> M Value
 throw d v = M $ \ _ _ k2 k1 -> k1 (EscapeResult k2 d v)
 
-catch :: Ident -> M Value -> (Value -> Value -> M Value) -> M Value
-catch d1 m f = M $ catch' d1 m f
+catch :: Ident -> M Value -> M Value
+catch d1 m = M $ catch' d1 m
 
-catch' :: Ident -> M Value -> (Value -> Value -> M Value) -> G -> Env -> K2 Value -> K1 -> Status
-catch' d1 m f g r k2 k1 = runM m g r emptyK2 (check k2 k1)
-  where check k2 k1 (ReturnResult v) = k2 k1 v
+catch' :: Ident -> M Value -> G -> Env -> K2 Value -> K1 -> Status
+catch' d1 m g r k2 k1 = runM m g r emptyK2 (check k2 k1)
+  where check k2 k1 (ReturnResult v) = k2 k1 (ConstructorValue 0 [v])
         check k2 k1 (EscapeResult x d2 v1) | d1 == d2 = let v2 = ClosureValue $ \ v -> M $ \ g r k2' k1' -> x (check k2' k1') v
-                                                         in runM (f v1 v2) g r k2 k1
+                                                         in k2 k1 (ConstructorValue 1 [v1, v2])
         check k2 k1 (EscapeResult x d2 v1) | otherwise = k1 (EscapeResult (\ k1 v -> x (check k2 k1) v) d2 v1)
 
 runUnreachable :: M Value

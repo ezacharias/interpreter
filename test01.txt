@@ -1,40 +1,26 @@
 The minimial program.
 
 
-    sum Maybe⟦a⟧
-      Nothing
-      Something(a)
-
-    sum Only⟦a⟧
-      Only(a)
-
     Main : Output
       IO.With(F)
 
-    F() : Output
-      bind s to case Something(Something(“Hi”))
-        Something(Nothing)
-          “A”
-        Nothing
-          “B”
-        Something(Something(x))
-          Foo(Only(x))
-      IO.Print(s)
-      IO.Print(“B“Bye”ye”)
-      Exit
-
-    Foo(x : Only⟦String⟧) : String
-      case x
-        Only(s)
-          s
+    F() : ()
+      IO.Print(“Hi”)
+      IO.Print(“Bye”)
 
     mod IO
 
       new E = Escape⟦String, ()⟧
 
-      With(f : () ⟶ Output) : Output
-        for (x)(k) in E.Catch(f)
-          Write(x)(Continue(k))
+      With(f : () ⟶ ()) : Output
+        Loop(E.Catch(f))
+
+      Loop(s : Stream⟦String, (), ()⟧) : Output
+        case s
+          End()
+            Exit
+          Next(x)(k)
+            Write(x)(Continue(Compose(Loop)(k)))
 
       Print(x : String) : ()
         E.Throw(x)
@@ -45,5 +31,5 @@ The minimial program.
     Identity⟦a⟧(x : a) : a
       x
 
-    Written(x : String)(f : () ⟶ Output) : Output
-      Write(x)(Continue(f))
+    Compose⟦a, b, c⟧(f : b ⟶ c)(g : a ⟶ b)(x : a) : c
+      f(g(x))
