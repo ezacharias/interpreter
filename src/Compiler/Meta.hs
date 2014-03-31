@@ -215,6 +215,7 @@ updatePat p =
       return $ Syntax.LowerPat pos x
     Syntax.TuplePat pos _ ps -> do
       tys <- mapM (const gen) ps
+      ps <- mapM updatePat ps
       return $ Syntax.TuplePat pos tys ps
     Syntax.UnderbarPat ->
       return Syntax.UnderbarPat

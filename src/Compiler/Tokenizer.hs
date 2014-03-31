@@ -145,7 +145,7 @@ lower :: Position -> Position -> ReversedString -> Tokenizer
 lower pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (LowerToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
-        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9'
                   = lower (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (LowerToken (reverse cs)) (present c $ tok pos')
 
@@ -153,7 +153,7 @@ upper :: Position -> Position -> ReversedString -> Tokenizer
 upper pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (UpperToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
-        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9'
                   = upper (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (UpperToken (reverse cs)) (present c $ tok pos')
 
@@ -161,7 +161,7 @@ dotLower :: Position -> Position -> ReversedString -> Tokenizer
 dotLower pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (DotLowerToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
-        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9'
                   = dotLower (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (DotLowerToken (reverse cs)) (present c $ tok pos')
 
@@ -169,7 +169,7 @@ dotUpper :: Position -> Position -> ReversedString -> Tokenizer
 dotUpper pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (DotUpperToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
-        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+        test c | 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9'
                   = dotUpper (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (DotUpperToken (reverse cs)) (present c $ tok pos')
 

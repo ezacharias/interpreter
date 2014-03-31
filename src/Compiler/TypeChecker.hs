@@ -263,6 +263,11 @@ typeCheckTerm g s ty (Syntax.BindTerm tyP p t1 t2) =
             Left msg -> Left msg
             Right g -> typeCheckTerm g s ty t2
 
+typeCheckTerm g s ty (Syntax.ForTerm [] ty2 [] t1 t2) =
+      case typeCheckTerm g s (Type.Arrow (Type.Arrow Type.Unit ty2) ty) t1 of
+        Left msg -> Left msg
+        Right s -> typeCheckTerm g s ty2 t2
+
 typeCheckTerm g s ty (Syntax.ForTerm tyPs ty2 ps t1 t2) =
   case typeCheckPats s tyPs ps of
     Left msg -> Left msg
