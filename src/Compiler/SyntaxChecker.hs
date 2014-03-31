@@ -295,21 +295,21 @@ reallyCheckPath r names decs =
       reallyCheckPath (decs : r) names' decs
     (name@(TypeName, _, pos, s1, arity) : _, Syntax.SumDec _ _ s2 vs cs : _) | s1 == s2 -> do
       checkArity name vs
-    (name@(FunName, _, pos, s1, arity) : _, Syntax.SumDec _ _ _ _ cs : _) ->
+    (name@(FunName, _, pos, s1, arity) : _, Syntax.SumDec _ _ _ _ cs : decs') ->
       let iter cs =
             case cs of
               [] ->
-                return ()
+                reallyCheckPath r names decs'
               ((_, _, s2, vs) : _) | s1 == s2 ->
                 checkArity name vs
               (_ : cs) ->
                 iter cs
        in iter cs
-    (name@(ConName n, _, pos, s1, arity) : _, Syntax.SumDec _ _ _ vs cs : _) ->
+    (name@(ConName n, _, pos, s1, arity) : _, Syntax.SumDec _ _ _ vs cs : decs') ->
       let iter cs =
             case cs of
               [] ->
-                return ()
+                reallyCheckPath r names decs'
               ((_, _, s2, ps) : _) | s1 == s2 ->
                 unless (n == length ps) $
                   syntaxErrorLineCol pos $ "Incorrect number of arguments for constructor " ++ s1 ++ "."
@@ -321,7 +321,7 @@ reallyCheckPath r names decs =
       reallyCheckPath r names decs'
     (name@(x, FieldFocus, pos, s1, _) : names', []) ->
       syntaxErrorLineCol pos $ "Could not find " ++ nameTypeString x ++ " " ++ s1 ++ "."
-    (name@(_, NameFocus, _, s1, _) : names', []) ->
+    (name@(x, NameFocus, pos, s1, _) : names', []) ->
       case r of
         [] -> unreachable "reallyCheckPath"
         (_ : decs : r') -> reallyCheckPath (decs : r') names decs
@@ -361,7 +361,7 @@ reallyCheckPath r names decs =
             [name1@(UnitName, NameFocus, _, "Escape", _), name2@(FunName, FieldFocus, _, "Throw", _)] -> do
               checkArity name1 [(), ()]
               checkArity name2 []
-            _ -> todo $ "primitive: " ++ show names
+            _ -> syntaxErrorLineCol pos $ "Declaration not found for " ++ nameTypeString x ++ " " ++ s1 ++ "."
 
 nameTypeString :: NameType -> String
 nameTypeString x =
