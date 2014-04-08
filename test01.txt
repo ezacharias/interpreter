@@ -1,11 +1,56 @@
 The minimial program.
 
 
+    sum Maybe⟦a⟧
+      Nothing
+      Something(a)
+
+    sum Bool
+      False
+      True
+
+    unit Context⟦value⟧
+
+      new B = Box⟦Table⟦value⟧⟧
+
+      With⟦a⟧(f : () ⟶ a) : a
+        B.With(Table.Empty)(f)
+
+      Get(s : Symbol) : value
+        Table.Get(B.Get, s)
+
+      MaybeGet(s : Symbol) : Maybe⟦value⟧
+        Table.MaybeGet(B.Get, s)
+
+      Set(s : Symbol, x : value) : ()
+        for (t) in B.Alter
+          Table.Set(t, s, x)
+
+      Has(s : Symbol) : Bool
+        Table.Has(B.Get, s)
+
     sum List⟦a⟧
       Nil
       Cons(a)
 
     sum Table⟦a⟧
+
+    mod Table
+
+      Empty⟦a⟧ : Table⟦a⟧
+        Unreachable
+
+      Get⟦a⟧(t : Table⟦a⟧, s : Symbol) : a
+        Unreachable
+
+      MaybeGet⟦a⟧(t : Table⟦a⟧, s : Symbol) : Maybe⟦a⟧
+        Unreachable
+
+      Set⟦a⟧(t : Table⟦a⟧, s : Symbol, x : a) : Table⟦a⟧
+        Unreachable
+
+      Has⟦a⟧(t : Table⟦a⟧, s : Symbol) : Bool
+        Unreachable
 
     sum Symbol
 
@@ -142,6 +187,9 @@ The minimial program.
 
       Modify(f : a ⟶ a) : a
         E.Throw(f)
+
+      Alter(f : a ⟶ a) : ()
+        Ignore(Modify(f))
 
       Get : a
         Modify(Identity)
