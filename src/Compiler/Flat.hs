@@ -1,4 +1,6 @@
-module Compiler.CPS where
+-- This language does not have nested terms.
+
+module Compiler.Flat where
 
 import Data.IntMap (IntMap)
 
@@ -24,7 +26,7 @@ data Fun = Fun Type Term
    deriving (Eq, Ord, Show)
 
 data Type =
-   ClosureType [Type]
+   ArrowType Type Type
  | StringType
  | TupleType [Type]
  | UnitType
@@ -100,12 +102,12 @@ data Term =
    -- ^ Tag, Sum type, Body, Handler Closure
  | ConcatenateTerm Ident Ident (Ident, Term)
  | ConstructorTerm Ident Index [Ident] (Ident, Term)
- | LambdaTerm Ident [Ident] [Type] Term Term
- | StringTerm String (Ident, Term)
+ | LambdaTerm [Ident] [Type] Term (Ident, Term)
+ | StringTerm Ident String Term
  | ThrowTerm Ident [Ident]
    -- ^ Throw using the tag and arguments
- | TupleTerm Ident [Ident] Term
+ | TupleTerm Ident [Term] Term
  | UnitTerm Ident Term
  | UnreachableTerm Type
- | UntupleTerm Term ([Ident], Term)
+ | UntupleTerm [Ident] Term Term
    deriving (Eq, Ord, Show)

@@ -10,9 +10,32 @@ convertSimpleToCPS = todo "convertSimpleToCPS"
 withContinuation :: Simple.Ident -> M a -> M a
 withContinuation = todo "withContinuation"
 
+shiftTail :: CPS.Ident -> (Simple.Term -> M a) -> M a
+shiftTail = todo "c"
+
+getHandler :: CPS.Type -> M CPS.Ident
+getHandler = todo "getHandler"
+
 convertTerm :: Simple.Term -> M CPS.Ident
 convertTerm t =
   case t of
+    Simple.ApplyTerm t1 t2 -> do
+      d1 <- convertTerm t1
+      d2 <- convertTerm t2
+      ty1 <- getIdentType d2
+      d3 <- gen
+      d4 <- gen
+      -- This is the continuation handler
+      d5 <- getHandler ty1
+      d6 <- gen
+      d7 <- gen
+      d8 <- gen
+      -- This is regular CPS. We want to have a case for a basic return.
+      returnLet d3 $ \ t3 ->
+        CPS.LambdaTerm d4 [d6] [todo "convertTerm"]
+            (CPS.LambdaTerm d7 [d3, d8] [ty1] t3
+              (CPS.CallTerm d5 [d6, d7])) $
+          CPS.ApplyTerm d1 [d2, d4]
     Simple.CatchTerm d1 d2 t1 -> do
       -- ^ Tag, Sum type, Body, Handler Closure
       d3 <- convertTerm t1
@@ -22,7 +45,7 @@ convertTerm t =
         d5 <- convertTerm t1
         -- LambdaTerm [Ident] [Type] Term (Ident, Term)
         d6 <- gen
-        returnTail $ CPS.LambdaTerm [] [] d5 (d6, CPS.CaseTerm [...])
+        -- returnTail $ CPS.LambdaTerm [] [] d5 (d6, CPS.CaseTerm [...])
         todo "convertTerm"
     Simple.ThrowTerm d1 t1 -> do
       d2 <- convertTerm t1
@@ -34,11 +57,26 @@ convertTerm t =
         continuationIdent <- getContinuationIdent
         returnTail $ CPS.ConstructorTerm sumIdent index [d2, d3]
           (constructorIdent, CPS.ApplyTerm continuationIdent [constructorIdent])
+
+    Simple.TupleTerm t1s -> do
+      d1s <- mapM convertTerm t1s
+      d2 <- gen
+      t2 <- todo "convertTerm"
+      returnLet d2 $ CPS.TupleTerm d2 d1s
     Simple.UnitTerm -> do
-      k1 <- todo "convertTerm"
       d1 <- gen
-      returnTail $ CPS.UnitTerm (d1, k1 d1)
-    _ -> todo "convertTerm"
+      returnLet d1 $ CPS.UnitTerm d1
+    Simple.VariableTerm d1 -> do
+      d2 <- getIdent d1 -- todo "convertTerm"
+      returnLet d2 id
+    _ ->
+      todo "convertTerm"
+
+getIdent :: Simple.Ident -> M CPS.Ident
+getIdent = todo "getIdent"
+
+returnLet :: CPS.Ident -> (CPS.Term -> CPS.Term) -> M CPS.Ident
+returnLet = todo "floop"
 
 getIdentType :: CPS.Ident -> M CPS.Type
 getIdentType = todo "getIdentType"
