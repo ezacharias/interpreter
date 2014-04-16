@@ -17,10 +17,8 @@ data Program = Program
 data Sum = Sum [[Type]]
    deriving (Eq, Ord, Show)
 
--- Functions are actually called with no arguments. Hence, they are just a
--- return type and a term. To take an argument, the term returns a lambda
--- expression.
-data Fun = Fun Type Term
+-- Functions take multiple arguments. They do not have return types.
+data Fun = Fun [Ident] [Type] Term
    deriving (Eq, Ord, Show)
 
 data Type =
@@ -92,20 +90,18 @@ data Type =
 --  Returns the value of the variable binding.
 data Term =
    ApplyTerm Ident [Ident]
-   -- ^ For calling closurs.
+   -- ^ For calling closurs. Tail position.
  | CallTerm Ident [Ident]
-   -- ^ For calling top-level functions.
+   -- ^ For calling top-level functions. Tail position.
  | CaseTerm Ident [([Ident], Term)]
- | CatchTerm Ident Ident Term Ident
-   -- ^ Tag, Sum type, Body, Handler Closure
- | ConcatenateTerm Ident Ident (Ident, Term)
- | ConstructorTerm Ident Index [Ident] (Ident, Term)
+   -- ^ Tail position.
+ | ConcatenateTerm Ident Ident Ident Term
+ | ConstructorTerm Ident Ident Index [Ident] Term
  | LambdaTerm Ident [Ident] [Type] Term Term
- | StringTerm String (Ident, Term)
- | ThrowTerm Ident [Ident]
-   -- ^ Throw using the tag and arguments
+ | StringTerm Ident String Term
  | TupleTerm Ident [Ident] Term
  | UnitTerm Ident Term
  | UnreachableTerm Type
- | UntupleTerm Term ([Ident], Term)
+   -- ^ Tail position.
+ | UntupleTerm [Ident] Ident Term
    deriving (Eq, Ord, Show)
