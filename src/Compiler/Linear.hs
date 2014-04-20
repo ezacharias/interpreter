@@ -1,17 +1,14 @@
 module Compiler.Linear where
 
-import Data.IntMap (IntMap)
-
 type Ident = Int
-type IdentMap a = IntMap a
 type Index = Int
 
 -- A program is a set of tag declarations, sum type declarations, function
 -- declarations, and a main function.
 data Program = Program
- { programTags :: IdentMap Tag
- , programSums :: IdentMap Sum
- , programFuns :: IdentMap Fun
+ { programTags :: [(Ident, Tag)]
+ , programSums :: [(Ident, Sum)]
+ , programFuns :: [(Ident, Fun)]
  , programMain :: Ident
  } deriving (Eq, Ord, Show)
 
@@ -43,7 +40,9 @@ data Type =
 data Term =
    ApplyTerm [Ident] Ident [Ident] Term
  | CallTerm [Ident] Ident [Ident] Term
- | CaseTerm [Ident] Ident [([Ident], Term)] Term
+ | CaseTerm Ident [([Ident], Term)]
+   -- ^ The tail of the case becomes a closure which is tail-called by each of
+   --   the branches.
  | CatchTerm Ident Ident Ident Term Term
    -- ^ CatchTerm tag sumTypeIdent term. Evaluates the term, returning a stream
    --   with the ident.
@@ -53,7 +52,7 @@ data Term =
  | ReturnTerm [Ident]
  | StringTerm Ident String Term
  | ThrowTerm Ident Ident Ident Term
-   -- ^ ThrowTerm bind tag arg delim body.
+   -- ^ ThrowTerm bind tag arg body.
  | TupleTerm Ident [Ident] Term
  | UnreachableTerm Type
    -- ^ Always a tail-call.

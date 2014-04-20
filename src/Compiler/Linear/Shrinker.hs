@@ -1,11 +1,74 @@
 module Compiler.Linear.Shrinker where
 
-import Control.Monad (forM)
+import Data.Maybe (fromMaybe)
 
 import Compiler.Linear
+import qualified Compiler.Linear.Shrinker.Basic as Basic
+import qualified Compiler.Linear.Shrinker.Speculative as Speculative
 
 shrink :: Program -> Program
-shrink = todo "shrink"
+shrink p = fromMaybe p (shrinkBothFull p)
+
+shrinkBothFull :: Program -> Maybe Program
+shrinkBothFull p = f (const Nothing) p
+  where f m p = case shrinkBothOnce p of
+                  Nothing -> m p
+                  Just p -> f Just p
+
+-- Runs both runs until one of them is unchanged.
+shrinkBothOnce :: Program -> Maybe Program
+shrinkBothOnce p = do
+  p <- shrink1Full p
+  shrink2Full p
+
+-- Runs the first shrink multiple rounds until no change.
+shrink1Full :: Program -> Maybe Program
+shrink1Full p = f (const Nothing) p
+  where f m p = case shrink1Once p of
+                  Nothing -> m p
+                  Just p -> f Just p
+
+-- Runs the second shrink.
+shrink2Full :: Program -> Maybe Program
+shrink2Full p = shrink2Once p
+
+-- Inline trivial and uncurry as well as basic updates in linear time.
+shrink1Once :: Program -> Maybe Program
+shrink1Once p = Basic.shrink p
+
+-- Optimize only function bodies without looking outside the function. Uses
+-- speculative inlining in quadratic time.
+shrink2Once :: Program -> Maybe Program
+shrink2Once = Speculative.shrink
+
+
+
+
+
+{-
+
+analyzeFun :: Ident -> Fun -> ([Ident] -> [Value] -> M Term)
+analyzeFun d0 (Fun d1s ty1s ty2s t1) =
+  case t1 of
+    LambdaTerm d2 d3s ty3s t2 (ReturnTerm [d4]) | d2 == d4 ->
+      \ d1s' v1s -> do
+          d3s' <- mapM (const gen) d3s
+          d4' <- gen
+          t2' <- continue [d4']
+          d5s' <- mapM (const gen) d3s'
+          return $ LambdaTerm d4' d3s' ty3s (CallTerm d5s' d0 (d1s' ++ d3s') (ReturnTerm d5s')) t2'
+    ReturnTerm d2s ->
+      \ d1s' v1s -> do
+          withBinds d1s d1s' v1s $ do
+            d2s' <- mapM rename d2s
+            continue d2s'
+    _ ->
+      \ d1s' v1s -> do
+          mapM_ incUsed d1s
+          d2s' <- mapM (const gen) ty2s
+          t2' <- continue d2s'
+          return $ CallTerm d2s' d0 d1s' t2'
+
 
 type M a = [a]
 
@@ -329,6 +392,7 @@ withRename = todo "withRename"
 
 -}
 
+-}
 
 -- Utility Functions
 

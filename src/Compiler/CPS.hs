@@ -1,14 +1,11 @@
 module Compiler.CPS where
 
-import Data.IntMap (IntMap)
-
 type Ident = Int
-type IdentMap a = IntMap a
 type Index = Int
 
 data Program = Program
- { programSums :: IdentMap Sum
- , programFuns :: IdentMap Fun
+ { programSums :: [(Ident, Sum)]
+ , programFuns :: [(Ident, Fun)]
  , programMain :: Ident
  } deriving (Eq, Ord, Show)
 

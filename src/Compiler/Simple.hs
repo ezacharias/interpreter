@@ -2,18 +2,16 @@
 -- The module system has been eliminated. All variables use integers rather than strings.
 module Compiler.Simple where
 
-import Data.IntMap (IntMap)
 
 type Ident = Int
-type IdentMap a = IntMap a
 type Index = Int
 
 -- A program is a set of tag declarations, sum type declarations, function
 -- declarations, and a main function.
 data Program = Program
- { programTags :: IdentMap Tag
- , programSums :: IdentMap Sum
- , programFuns :: IdentMap Fun
+ { programTags :: [(Ident, Tag)]
+ , programSums :: [(Ident, Sum)]
+ , programFuns :: [(Ident, Fun)]
  , programMain :: Ident
  } deriving (Eq, Ord, Show)
 

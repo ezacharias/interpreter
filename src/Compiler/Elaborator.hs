@@ -503,12 +503,12 @@ addWork m = do
 addFun :: Simple.Ident -> Simple.Fun -> M ()
 addFun d x = do
   xs <- get programFuns
-  set (\ s -> s {programFuns = IdentMap.insert d x xs})
+  set (\ s -> s {programFuns = (d, x) : xs})
 
 addSum :: Simple.Ident -> Simple.Sum -> M ()
 addSum d x = do
   xs <- get programSums
-  set (\ s -> s {programSums = IdentMap.insert d x xs})
+  set (\ s -> s {programSums = (d, x) : xs})
 
 newtype M a = M { runM :: Look -> (a -> State -> Simple.Program) -> State -> Simple.Program }
 
@@ -518,9 +518,9 @@ data State = State
  , exportedTags :: Map Path Simple.Ident
  , exportedSums :: Map Path Simple.Ident
  , exportedFuns :: Map Path Simple.Ident
- , programTags  :: Simple.IdentMap Simple.Tag
- , programSums  :: Simple.IdentMap Simple.Sum
- , programFuns  :: Simple.IdentMap Simple.Fun
+ , programTags  :: [(Simple.Ident, Simple.Tag)]
+ , programSums  :: [(Simple.Ident, Simple.Sum)]
+ , programFuns  :: [(Simple.Ident, Simple.Fun)]
  }
 
 data Look = Look
@@ -544,9 +544,9 @@ run m = runM m look (\ x _ -> x) state
                       , exportedTags = Map.empty
                       , exportedSums = Map.empty
                       , exportedFuns = Map.empty
-                      , programTags = IdentMap.empty
-                      , programSums = IdentMap.empty
-                      , programFuns = IdentMap.empty
+                      , programTags = []
+                      , programSums = []
+                      , programFuns = []
                       }
 
 renamePath :: Path -> M Path

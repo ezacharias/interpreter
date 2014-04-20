@@ -1,7 +1,6 @@
 module Compiler.CPS.Convert where
 
 import Control.Monad (forM, forM_)
-import qualified Data.IntMap as IntMap
 
 import qualified Compiler.Simple as Simple
 import qualified Compiler.CPS as CPS
@@ -9,9 +8,9 @@ import qualified Compiler.CPS as CPS
 convertSimpleToCPS :: Simple.Program -> CPS.Program
 convertSimpleToCPS p = run $ do
 
-  forM_ (IntMap.toList (Simple.programFuns p)) $ \ (d, x) ->
+  forM_ (Simple.programFuns p) $ \ (d, x) ->
     convertFun d x
-  forM_ (IntMap.toList (Simple.programSums p)) $ \ (d, x) ->
+  forM_ (Simple.programSums p) $ \ (d, x) ->
     convertSum d x
   x1s <- get programSums
   x2s <- get programFuns
@@ -246,8 +245,8 @@ get :: (State -> a) -> M a
 get = todo "get"
 
 data State = State
-  { programSums :: CPS.IdentMap CPS.Sum
-  , programFuns :: CPS.IdentMap CPS.Fun
+  { programSums :: [(CPS.Ident, CPS.Sum)]
+  , programFuns :: [(CPS.Ident, CPS.Fun)]
   }
 
 {-
