@@ -45,25 +45,36 @@ convertTerm t h k =
        in convertTerm t1 h' k'
     -- Should we do something to make this better?
     Simple.FunTerm d1 -> do
-      d2 <- gen
+      d2  <- gen
       t1' <- k h d2
-      d3 <- gen
-      d4 <- gen
-      return $ CPS.LambdaTerm d2 [d3, d4] undefined (CPS.CallTerm d1 [d3, d4]) $ t1'
+      d3  <- gen
+      d4  <- gen
+      d5  <- getResultTypeIdent
+      ty1 <- getFunType d1
+      ty2s <- return $ [ CPS.ArrowType [ty1, CPS.ArrowType [CPS.SumType d5]]
+                       , CPS.ArrowType [CPS.SumType d5]
+                       ]
+      return $ CPS.LambdaTerm d2 [d3, d4] ty2s (CPS.CallTerm d1 [d3, d4]) $ t1'
     Simple.LambdaTerm d1 ty1 t1 -> do
-      d2 <- gen
-      d3 <- gen
-      d4 <- gen
-      t1' <- convertTerm t1 (createH d4) (createK d3)
-      t2' <- k h d2
-      return $ CPS.LambdaTerm d2 [d1, d3, d4] undefined t1' t2'
+      d2   <- gen
+      d3   <- gen
+      d4   <- gen
+      t1'  <- convertTerm t1 (createH d4) (createK d3)
+      t2'  <- k h d2
+      ty1' <- convertType ty1
+      -- I am not sure how I want to get this type.
+      ty3' <- undefined
+      d5   <- getResultTypeIdent
+      ty2s <- return $ [ ty1'
+                       , CPS.ArrowType [ty3', CPS.ArrowType [CPS.SumType d5]]
+                       , CPS.ArrowType [CPS.SumType d5]
+                       ]
+      return $ CPS.LambdaTerm d2 [d1, d3, d4] ty2s t1' t2'
     Simple.StringTerm s1 -> do
       d1 <- gen
       t1 <- k h d1
       return $ CPS.StringTerm d1 s1 t1
-    -- Do we want to construct a stream here? Probably we want to construct it
-    -- at the case.
-    Simple.ThrowTerm d1 t1 -> do -- Ident Term
+    Simple.ThrowTerm d1 t1 ->
       convertTerm t1 h $ \ h d1 ->
         createKClosure k $ \ d4 -> do
           d2 <- gen
@@ -84,6 +95,11 @@ convertTerm t h k =
  | VariableTerm Ident
 -}
 
+convertType :: Simple.Type -> M CPS.Type
+convertType = undefined
+
+getFunType :: Simple.Ident -> M CPS.Type
+getFunType = undefined
 
 getStandardRules :: M [([CPS.Ident], CPS.Term)]
 getStandardRules = undefined
@@ -123,13 +139,15 @@ createKClosure k m = do
   d1 <- gen
   d2 <- gen
   t1 <- k (\ d3 -> return $ CPS.ApplyTerm d2 [d3]) d1
+  ty1 <- undefined
   case t1 of
     CPS.ApplyTerm d3 [d4, d5] | d3 /= d4 && d3 /= d5 && d1 == d4 && d2 == d5 ->
       m d3
     _ -> do
       d3 <- gen
       t2 <- m d3
-      return $ CPS.LambdaTerm d3 [d1, d2] [undefined, undefined] t1 t2
+      d4 <- getResultTypeIdent
+      return $ CPS.LambdaTerm d3 [d1, d2] [ty1, CPS.ArrowType [CPS.SumType d4]] t1 t2
 
 -- Eta-reduce the H closure if possibe.
 createHClosure :: H -> (CPS.Ident -> M CPS.Term) -> M CPS.Term
@@ -142,7 +160,8 @@ createHClosure h m = do
     _ -> do
       d2 <- gen
       t2 <- m d2
-      return $ CPS.LambdaTerm d2 [d1] undefined t1 t2
+      d3 <- getResultTypeIdent
+      return $ CPS.LambdaTerm d2 [d1] [CPS.SumType d3] t1 t2
 
 gen :: M CPS.Ident
 gen = undefined
