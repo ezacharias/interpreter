@@ -32,6 +32,6 @@ data Term =
  | LambdaTerm Ident [Ident] [Type] Term Term
  | StringTerm Ident String Term
  | TupleTerm Ident [Ident] Term
- | UnreachableTerm Type
+ | UnreachableTerm
  | UntupleTerm [Ident] Term Term
    deriving (Eq, Ord, Show)
