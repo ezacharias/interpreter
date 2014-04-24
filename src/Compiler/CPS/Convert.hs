@@ -1,5 +1,6 @@
 module Compiler.CPS.Convert where
 
+import Control.Monad (forM)
 import Data.Maybe (fromMaybe)
 
 import qualified Compiler.CPS as CPS
@@ -37,20 +38,8 @@ convertTerm t h k =
             ty4 <- getStreamType ty1 ty2 ty3
             createKClosure k ty4 $ \ d6 _ ->
               createHClosure h $ \ d7 -> do
-                c1s <- getStandardRules
-                i   <- getNormalResultIndex ty3
-                c   <- do d4 <- gen
-                          d5 <- gen
-                          return ([d4], CPS.ConstructorTerm d5 d2 0 [d4]
-                                      $ CPS.ApplyTerm d6 [d5, d7])
-                c1s <- return $ substitute i c c1s
-                i   <- getThrowIndex d1
-                c   <- do d4 <- gen
-                          d5 <- gen
-                          return ([d4, d5], CPS.ConstructorTerm d6 d2 1 [d4, d5]
-                                          $ CPS.ApplyTerm d6 [d6, d7])
-                c1s <- return $ substitute i c c1s
-                return $ CPS.CaseTerm d3 c1s
+                d8 <- createHandlerFunction
+                return $ CPS.CallTerm d8 [d3, d6, d7]
           k' h d3 ty3 = do
             d4  <- gen
             -- This I think could be a normal result to a particular tag, but
@@ -287,6 +276,115 @@ exportRecursiveFoo d1 kd hd = do
   exportFun d0 $ CPS.Fun [d1, kd, hd] [] $
                    undefined
   undefined
+
+
+createHandlerFunction :: M CPS.Ident
+createHandlerFunction = do
+  d0 <- gen
+  d1 <- gen
+  d2 <- gen
+  d3 <- gen
+  d4 <- gen
+  c1s <- createRules d0 undefined undefined undefined undefined
+  exportFun d0 $ CPS.Fun [d1, d2, d3] []
+               $   CPS.CaseTerm d4 c1s
+  return d0
+
+-- A throw picks an index based only on the tag.
+-- d0 is the function to call
+-- d1 is the tag
+-- ty1 is the result type
+createRules :: CPS.Ident -> CPS.Ident -> CPS.Ident -> CPS.Ident -> CPS.Ident -> M [([CPS.Ident], CPS.Term)]
+createRules d0 d1 ty1 kd hd = do
+  xs <- getTagTypes
+  xs' <- forM xs $ \ (d2, ty2, ty3) ->
+           if d1 == d2
+             then do
+               d3 <- gen
+               d4 <- gen
+               d5 <- gen
+               d6 <- gen
+               d7 <- gen
+               d8 <- gen
+               d9 <- gen
+               d10 <- gen
+               d11 <- gen
+               return ( [d3, d4]
+                      , CPS.LambdaTerm d5 [d6, d7, d8] []
+                          (CPS.LambdaTerm d9 [d10] []
+                             (CPS.CallTerm d0 [d10, d7, d8])
+                          $ CPS.ApplyTerm d4 [d6, d9]
+                          )
+                      $ CPS.ConstructorTerm d11 undefined undefined [d3, d5]
+                      $ CPS.ApplyTerm kd [d11, hd]
+                      )
+             else do
+               d3 <- gen
+               d4 <- gen
+               d5 <- gen
+               d6 <- gen
+               d7 <- gen
+               d8 <- gen
+               d9 <- gen
+               d10 <- gen
+               return ( [d3, d4]
+                      , CPS.LambdaTerm d5 [d6, d7] []
+                          ( CPS.LambdaTerm d8 [d9] []
+                              (CPS.CallTerm d0 [d9, kd, d7])
+                          $ CPS.ApplyTerm d4 [d6, d8]
+                          )
+                      $ CPS.ConstructorTerm d10 undefined undefined [d3, d5]
+                      $ CPS.ApplyTerm hd [d10]
+                      )
+  ys <- getNormalTypes
+  ys' <- forM ys $ \ ty2 ->
+           if ty1 == ty1
+             then do
+               d3 <- gen
+               d4 <- gen
+               return ( [d3]
+                      , CPS.ConstructorTerm d4 undefined undefined [d3]
+                      $ CPS.ApplyTerm kd [d4, hd]
+                      )
+             else do
+               d3 <- gen
+               return ( [d3]
+                      , CPS.UnreachableTerm
+                      )
+  return $ xs' ++ ys'
+
+
+getTagTypes :: M [(CPS.Ident, CPS.Type, CPS.Type)]
+getTagTypes = undefined
+
+getNormalTypes :: M [CPS.Type]
+getNormalTypes = undefined
+
+
+{-
+            -- The type given to K is the stream type, which I suppose we should calculate using the given types.
+            (ty1, ty2) <- undefined
+            ty3 <- undefined -- this should be part of catch
+            ty4 <- getStreamType ty1 ty2 ty3
+            createKClosure k ty4 $ \ d6 _ ->
+              createHClosure h $ \ d7 -> do
+                c1s <- getStandardRules
+                i   <- getNormalResultIndex ty3
+                c   <- do d4 <- gen
+                          d5 <- gen
+                          return ([d4], CPS.ConstructorTerm d5 d2 0 [d4]
+                                      $ CPS.ApplyTerm d6 [d5, d7])
+                c1s <- return $ substitute i c c1s
+                i   <- getThrowIndex d1
+                c   <- do d4 <- gen
+                          d5 <- gen
+                          return ([d4, d5], CPS.ConstructorTerm d6 d2 1 [d4, d5]
+                                          $ CPS.ApplyTerm d6 [d6, d7])
+                c1s <- return $ substitute i c c1s
+                return $ CPS.CaseTerm d3 c1s
+-}
+
+
 
 exportFun :: CPS.Ident -> CPS.Fun -> M ()
 exportFun = undefined
