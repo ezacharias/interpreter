@@ -20,25 +20,22 @@ convertTerm t h k =
         bind d1 d2 ty2 $
           convertTerm t3 h k
     Simple.CaseTerm t1 c1s -> do
-      convertTerm t1 h $ \ h d1 _ -> do
-        ty2 <- undefined -- this should come from the case term
+      convertTerm t1 h $ \ h d1 ty1 -> do
+        ty2 <- getRuleType ty1 (head c1s)
         createKClosure k ty2 $ \ d3 _ ->
           createHClosure h $ \ d4 -> do
             c1s' <- mapM (convertRule (createH d4) (createK d3)) c1s
             return $ CPS.CaseTerm d1 c1s'
-
     Simple.CatchTerm d1 d2 t1 ->
       -- We have to begin here, which handles the catch. I think it should
       -- very nearly simply call the function with h, k, and the result, which
       -- would be easy.
       let h' d3 = do
-            -- The type given to K is the stream type, which I suppose we should calculate using the given types.
-            (ty1, ty2) <- undefined
-            ty3 <- undefined -- this should be part of catch
-            ty4 <- getStreamType ty1 ty2 ty3
-            createKClosure k ty4 $ \ d6 _ ->
+            -- The type given to K is the stream type.
+            createKClosure k (CPS.SumType d2) $ \ d6 _ ->
               createHClosure h $ \ d7 -> do
-                d8 <- createHandlerFunction undefined
+                ty1 <- getTermType t1
+                d8 <- createHandlerFunction d1 ty1 d2
                 return $ CPS.CallTerm d8 [d3, d6, d7]
           k' h d3 ty3 = do
             d4  <- gen
@@ -50,7 +47,6 @@ convertTerm t h k =
             return $ CPS.ConstructorTerm d4 d5 i [d3]
                    $ t2'
        in convertTerm t1 h' k'
-
     -- Should we do something to make this better?
     Simple.FunTerm d1 -> do
       d2  <- gen
@@ -69,7 +65,7 @@ convertTerm t h k =
         d3   <- gen
         d4   <- gen
         t1'  <- convertTerm t1 (createH d4) (createK d3)
-        ty2' <- undefined -- should be in the lambda
+        ty2' <- getTermType t1
         ty0' <- getHandlerType
         t2'  <- k h d2 (CPS.ArrowType [ty1', CPS.ArrowType [ty2', ty0'], ty0'])
         return $ CPS.LambdaTerm d2 [d1', d3, d4] [ty1', CPS.ArrowType [ty2', ty0'], ty0'] t1' t2'
@@ -93,7 +89,8 @@ convertTerm t h k =
     Simple.VariableTerm d1 -> do
       (d2, ty2) <- lookupIdent d1
       k h d2 ty2
-    _ -> undefined
+    _ ->
+      undefined
 
 {-
  | ConcatenateTerm Term Term
@@ -120,6 +117,12 @@ convertType ty =
       return $ CPS.TupleType []
     Simple.SumType s1 ->
       return $ CPS.SumType s1
+
+getRuleType :: CPS.Type -> ([Simple.Ident], Simple.Term) -> M CPS.Type
+getRuleType ty (ds, t) = undefined
+
+getTermType :: Simple.Term -> M CPS.Type
+getTermType t = undefined
 
 getHandlerType :: M CPS.Type
 getHandlerType = do
@@ -246,69 +249,43 @@ getNormalResultIndex ty = undefined
 getTagResultType :: CPS.Ident -> M CPS.Type
 getTagResultType d = undefined
 
-getStreamType :: CPS.Type -> CPS.Type -> CPS.Type -> M CPS.Type
-getStreamType = undefined
-
 makeNormalResult :: CPS.Type -> H -> K -> M ([CPS.Ident], CPS.Term)
 makeNormalResult ty1 h k = do
   d1 <- gen
   return ([d1], CPS.UnreachableTerm)
 
-makeTagResult :: CPS.Ident -> CPS.Type -> CPS.Ident -> CPS.Ident -> M ([CPS.Ident], CPS.Term)
-makeTagResult fd ty1 hd kd = do
-  d1 <- gen
-  d2 <- gen
-  d3 <- gen
-  d4 <- gen
-  d5 <- gen
-  d6 <- gen
-  d7 <- gen
-  d8 <- gen
-  i  <- gen
-  return ( [d1, d2]
-         , CPS.LambdaTerm d3 [d4, d5] [ty1, undefined]
-             ( CPS.LambdaTerm d6 [d7, d8] [undefined, undefined]
-                 ( CPS.CallTerm fd [d7, kd, d8] )
-             $ CPS.ApplyTerm d2 [d4, d6]
-             )
-         $ CPS.ConstructorTerm d7 d8 i [d1, d3]
-         $ CPS.ApplyTerm hd [d7]
-         )
-
 --   sd is the sum ident of the stream which is of the first argument to the
 --         continuation closure
-createHandlerFunction :: CPS.Ident -> M CPS.Ident
-createHandlerFunction sd = do
+createHandlerFunction :: CPS.Ident -> CPS.Type -> CPS.Ident -> M CPS.Ident
+createHandlerFunction td ty1 sd = do
   d0 <- gen
   d1 <- gen
   d2 <- gen
   d3 <- gen
   ty2 <- getResultType
   ty3 <- getHandlerType
-  c1s <- createRules d0 undefined undefined d2 d3
+  c1s <- createRules d0 td ty1 sd d2 d3
   exportFun d0 $ CPS.Fun [d1, d2, d3] [ty2, CPS.ArrowType [CPS.SumType sd, ty3], ty3]
                $   CPS.CaseTerm d1 c1s
   return d0
-
-getStreamTypeIdent :: CPS.Type -> CPS.Type -> CPS.Type -> M CPS.Ident
-getStreamTypeIdent ty1 ty2 ty3 = undefined
 
 -- A throw picks an index based only on the tag.
 --   d0  is the ident of the handler function
 --   d1  is the tag being caught
 --   ty1 is the type of the body of the catch
+--   sd  is the ident of the stream sum used
 --   kd  is the ident of the continuation closure
 --   hd  is the ident of the handler closure
-createRules :: CPS.Ident -> CPS.Ident -> CPS.Type -> CPS.Ident -> CPS.Ident -> M [([CPS.Ident], CPS.Term)]
-createRules d0 d1 ty1 kd hd = do
+createRules :: CPS.Ident -> CPS.Ident -> CPS.Type -> CPS.Ident -> CPS.Ident -> CPS.Ident -> M [([CPS.Ident], CPS.Term)]
+createRules d0 d1 ty1 sd kd hd = do
+  rd <- getResultTypeIdent
   rty <- getResultType
   hty <- getHandlerType
   -- We could just lookup from the tag types.
   (ty2, ty3) <- getTag d1
-  sd <- getStreamTypeIdent ty1 ty2 ty3
   sty <- return $ CPS.SumType sd
   xs <- getTagTypes
-  xs' <- forM xs $ \ (d2, ty2, ty3) ->
+  xs' <- forM xs $ \ (d2, i1, ty2, ty3) ->
            if d1 == d2
              then do
                d3 <- gen
@@ -344,7 +321,7 @@ createRules d0 d1 ty1 kd hd = do
                               (CPS.CallTerm d0 [d9, kd, d7])
                           $ CPS.ApplyTerm d4 [d6, d8]
                           )
-                      $ CPS.ConstructorTerm d10 sd 1 [d3, d5]
+                      $ CPS.ConstructorTerm d10 rd i1 [d3, d5]
                       $ CPS.ApplyTerm hd [d10]
                       )
   ys <- getNormalTypes
@@ -364,10 +341,13 @@ createRules d0 d1 ty1 kd hd = do
                       )
   return $ xs' ++ ys'
 
+getStreamTypeIdent :: CPS.Type -> CPS.Type -> CPS.Type -> M CPS.Ident
+getStreamTypeIdent ty1 ty2 ty3 = undefined
+
 getTag :: CPS.Ident -> M (CPS.Type, CPS.Type)
 getTag d1 = undefined
 
-getTagTypes :: M [(CPS.Ident, CPS.Type, CPS.Type)]
+getTagTypes :: M [(CPS.Ident, CPS.Index, CPS.Type, CPS.Type)]
 getTagTypes = undefined
 
 getNormalTypes :: M [CPS.Type]
@@ -376,9 +356,6 @@ getNormalTypes = undefined
 
 exportFun :: CPS.Ident -> CPS.Fun -> M ()
 exportFun = undefined
-
-
-
 
 -- Utility Functions
 
