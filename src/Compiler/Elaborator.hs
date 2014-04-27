@@ -3,6 +3,7 @@ module Compiler.Elaborator where
 import           Control.Monad   (MonadPlus, forM, liftM, liftM2, mplus, msum,
                                   mzero, (<=<))
 import qualified Data.IntMap     as IdentMap
+import           Data.List (union)
 import           Data.Map        (Map)
 import qualified Data.Map        as Map
 import           Data.Maybe      (fromMaybe)
@@ -21,9 +22,10 @@ elaborate p = run $ do
   d <- getFun $ Path [Name "Main" []]
   finish p
   x1 <- get programTags
-  x2 <- get programSums
-  x3 <- get programFuns
-  return $ Simple.Program x1 x2 x3 d
+  x2 <- get programRess
+  x3 <- get programSums
+  x4 <- get programFuns
+  return $ Simple.Program x1 x2 x3 x4 d
 
 -- Run until the work queue is empty.
 finish :: Syntax.Program -> M ()
@@ -275,6 +277,7 @@ primitiveCatch tag d ty3 = do
   d2 <- getSum (Path [Name "Stream" [ty1, ty2, ty3]])
   d3 <- gen
   ty3 <- elaborateType ty3
+  addRes ty3
   addFun d $ Simple.Fun (Simple.ArrowType (Simple.ArrowType Simple.UnitType ty3)
                                           (Simple.SumType d2))
                (Simple.LambdaTerm d3 (Simple.ArrowType Simple.UnitType ty3)
@@ -510,6 +513,11 @@ addSum d x = do
   xs <- get programSums
   set (\ s -> s {programSums = (d, x) : xs})
 
+addRes :: Simple.Type -> M ()
+addRes x = do
+  xs <- get programRess
+  set (\ s -> s {programRess = [x] `union` xs})
+
 newtype M a = M { runM :: Look -> (a -> State -> Simple.Program) -> State -> Simple.Program }
 
 data State = State
@@ -519,6 +527,7 @@ data State = State
  , exportedSums :: Map Path Simple.Ident
  , exportedFuns :: Map Path Simple.Ident
  , programTags  :: [(Simple.Ident, Simple.Tag)]
+ , programRess  :: [Simple.Type]
  , programSums  :: [(Simple.Ident, Simple.Sum)]
  , programFuns  :: [(Simple.Ident, Simple.Fun)]
  }
@@ -545,6 +554,7 @@ run m = runM m look (\ x _ -> x) state
                       , exportedSums = Map.empty
                       , exportedFuns = Map.empty
                       , programTags = []
+                      , programRess = []
                       , programSums = []
                       , programFuns = []
                       }

@@ -10,6 +10,7 @@ type Index = Int
 -- declarations, and a main function.
 data Program = Program
  { programTags :: [(Ident, Tag)]
+ , programRess :: [Type]
  , programSums :: [(Ident, Sum)]
  , programFuns :: [(Ident, Fun)]
  , programMain :: Ident

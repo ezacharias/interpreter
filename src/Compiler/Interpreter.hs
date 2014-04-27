@@ -38,7 +38,7 @@ type Env = IntMap Value
 type G = IntMap Fun
 
 interpret :: Program -> Status
-interpret (Program _ _ xs d) = run (IntMap.fromList xs) $ do
+interpret (Program _ _ _ xs d) = run (IntMap.fromList xs) $ do
   t <- getFun d
   eval t
 

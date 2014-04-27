@@ -6,6 +6,16 @@ import Data.Maybe (fromMaybe)
 import qualified Compiler.CPS as CPS
 import qualified Compiler.Simple as Simple
 
+convert :: Simple.Program -> CPS.Program
+convert p = run p $ do
+  x1 <- get programSums
+  x2 <- get programFuns
+  d  <- get programMain
+  return $ CPS.Program x1 x2 d
+
+run :: Simple.Program -> M CPS.Program -> CPS.Program
+run = undefined
+
 convertTerm :: Simple.Term -> H -> K -> M CPS.Term
 convertTerm t h k =
   case t of
@@ -191,6 +201,9 @@ data Reader = R { resultIdent :: CPS.Ident
                 }
 
 data State = S { genInt :: Int
+               , programSums :: [(CPS.Ident, CPS.Sum)]
+               , programFuns :: [(CPS.Ident, CPS.Fun)]
+               , programMain :: CPS.Ident
                }
 
 look :: (Reader -> a) -> M a
