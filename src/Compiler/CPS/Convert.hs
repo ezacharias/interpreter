@@ -8,10 +8,62 @@ import qualified Compiler.Simple as Simple
 
 convert :: Simple.Program -> CPS.Program
 convert p = run p $ do
+  mapM_ convertSum (Simple.programSums p)
+  mapM_ convertFun (Simple.programFuns p)
   x1 <- get programSums
   x2 <- get programFuns
-  d  <- get programMain
+  d  <- renameFunIdent (Simple.programMain p)
   return $ CPS.Program x1 x2 d
+
+convertSum :: (Simple.Ident, Simple.Sum) -> M ()
+convertSum (d0, Simple.Sum tyss) = do
+  tyss' <- forM tyss $ \ tys ->
+             forM tys $ \ ty ->
+               convertType ty
+  d0' <- renameSumIdent d0
+  exportSum (d0', CPS.Sum tyss')
+
+renameSumIdent :: Simple.Ident -> M CPS.Ident
+renameSumIdent d = do
+  xs <- get sumIdentRenames
+  case lookup d xs of
+    Nothing -> do
+      d' <- gen
+      set $ \ s -> s {sumIdentRenames = (d,d'):xs}
+      return d'
+    Just d' ->
+      return d'
+
+renameFunIdent :: Simple.Ident -> M CPS.Ident
+renameFunIdent d = do
+  xs <- get funIdentRenames
+  case lookup d xs of
+    Nothing -> do
+      d' <- gen
+      set $ \ s -> s {funIdentRenames = (d,d'):xs}
+      return d'
+    Just d' ->
+      return d'
+
+exportSum :: (CPS.Ident, CPS.Sum) -> M ()
+exportSum x = do
+  xs <- get programSums
+  set $ \ s -> s {programSums = x:xs}
+
+exportFun :: (CPS.Ident, CPS.Fun) -> M ()
+exportFun x = do
+  xs <- get programFuns
+  set $ \ s -> s {programFuns = x:xs}
+
+convertFun :: (Simple.Ident, Simple.Fun) -> M ()
+convertFun (d0, Simple.Fun ty0 t0) = do
+  d1  <- renameFunIdent d0
+  d2  <- gen
+  d3  <- gen
+  t1  <- convertTerm t0 (createH d3) (createK d2)
+  ty1 <- convertType ty0
+  ty2 <- getHandlerType
+  exportFun (d1, CPS.Fun [d2, d3] [CPS.ArrowType [ty1, ty2], ty2] t1)
 
 run :: Simple.Program -> M CPS.Program -> CPS.Program
 run = undefined
@@ -57,16 +109,12 @@ convertTerm t h k =
             return $ CPS.ConstructorTerm d4 d5 i [d3]
                    $ t2'
        in convertTerm t1 h' k'
-    -- Should we do something to make this better?
     Simple.FunTerm d1 -> do
-      d2  <- gen
+      d2 <- renameFunIdent d1
       ty1 <- getFunType d1
-      t1  <- k h d2 ty1
-      d3  <- gen
-      d4  <- gen
-      ty0 <- getHandlerType
-      return $ CPS.LambdaTerm d2 [d3, d4] [CPS.ArrowType [ty1, ty0], ty0] (CPS.CallTerm d1 [d3, d4])
-             $ t1
+      createKClosure k ty1 $ \ d3 _ ->
+        createHClosure h $ \ d4 -> do
+          return $ CPS.CallTerm d2 [d3, d4]
     Simple.LambdaTerm d1 ty1 t1 -> do
       d1' <- gen
       ty1' <- convertType ty1
@@ -203,7 +251,8 @@ data Reader = R { resultIdent :: CPS.Ident
 data State = S { genInt :: Int
                , programSums :: [(CPS.Ident, CPS.Sum)]
                , programFuns :: [(CPS.Ident, CPS.Fun)]
-               , programMain :: CPS.Ident
+               , sumIdentRenames :: [(Simple.Ident, CPS.Ident)]
+               , funIdentRenames :: [(Simple.Ident, CPS.Ident)]
                }
 
 look :: (Reader -> a) -> M a
@@ -248,6 +297,7 @@ lookupIdent d = do
 getThrowIndex :: Simple.Ident -> M CPS.Index
 getThrowIndex d = undefined
 
+-- Note that this is a Simple.Ident and not a CPS.Ident.
 getFunType :: Simple.Ident -> M CPS.Type
 getFunType = undefined
 
@@ -278,8 +328,10 @@ createHandlerFunction td ty1 sd = do
   ty2 <- getResultType
   ty3 <- getHandlerType
   c1s <- createRules d0 td ty1 sd d2 d3
-  exportFun d0 $ CPS.Fun [d1, d2, d3] [ty2, CPS.ArrowType [CPS.SumType sd, ty3], ty3]
-               $   CPS.CaseTerm d1 c1s
+  exportFun ( d0
+            , CPS.Fun [d1, d2, d3] [ty2, CPS.ArrowType [CPS.SumType sd, ty3], ty3]
+            $   CPS.CaseTerm d1 c1s
+            )
   return d0
 
 -- A throw picks an index based only on the tag.
@@ -366,9 +418,6 @@ getTagTypes = undefined
 getNormalTypes :: M [CPS.Type]
 getNormalTypes = undefined
 
-
-exportFun :: CPS.Ident -> CPS.Fun -> M ()
-exportFun = undefined
 
 -- Utility Functions
 
