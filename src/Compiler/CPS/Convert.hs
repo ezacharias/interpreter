@@ -10,10 +10,39 @@ convert :: Simple.Program -> CPS.Program
 convert p = run p $ do
   mapM_ convertSum (Simple.programSums p)
   mapM_ convertFun (Simple.programFuns p)
+  d  <- createStartFun (Simple.programMain p)
   x1 <- get programSums
   x2 <- get programFuns
-  d  <- renameFunIdent (Simple.programMain p)
+  -- d  <- renameFunIdent (Simple.programMain p)
   return $ CPS.Program x1 x2 d
+
+createStartFun :: Simple.Ident -> M CPS.Ident
+createStartFun d1 = do
+  d2 <- gen
+  d3 <- gen
+  d4 <- gen
+  d5 <- gen
+  d6 <- gen
+  d7 <- gen
+  d8 <- gen
+  d9 <- gen
+  ty1 <- convertType (Simple.SumType 0)
+  i   <- getNormalResultIndex ty1
+  ty2 <- getHandlerType
+  ty3 <- getResultType
+  exportFun (d2
+            , CPS.Fun [] []
+              -- This is called with the Output type. It should pass it on to the handler.
+            $ CPS.LambdaTerm d3 [d4, d5] [ty1, ty2]
+                ( CPS.ConstructorTerm d6 d7 i [d4]
+                $ CPS.ApplyTerm d5 [d6]
+                )
+                -- This is called with the Result type.
+            $   CPS.LambdaTerm d8 [d9] [ty3]
+                  CPS.UnreachableTerm
+            $   CPS.CallTerm d1 [d3, d8]
+            )
+  return d2
 
 convertSum :: (Simple.Ident, Simple.Sum) -> M ()
 convertSum (d0, Simple.Sum tyss) = do

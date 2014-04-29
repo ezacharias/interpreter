@@ -4,9 +4,9 @@ type Ident = Int
 type Index = Int
 
 data Program = Program
- { programSums :: [(Ident, Sum)]
- , programFuns :: [(Ident, Fun)]
- , programMain :: Ident
+ { programSums  :: [(Ident, Sum)]
+ , programFuns  :: [(Ident, Fun)]
+ , programStart :: Ident
  } deriving (Eq, Ord, Show)
 
 data Sum = Sum [[Type]]

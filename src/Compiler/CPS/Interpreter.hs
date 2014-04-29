@@ -1,5 +1,7 @@
 module Compiler.CPS.Interpreter where
 
+import Data.Maybe (fromMaybe)
+
 import Compiler.CPS
 
 -- A program can exit normaly, due to an uncaught escape, or due to calling undefined.
@@ -27,14 +29,11 @@ instance Show Value where
 
 interpret :: Program -> Status
 interpret p = run p $ do
-  (ds, t) <- getFun (programMain p)
-  bind ds [ ClosureValue $ \ [v, h] -> closureValue h [v]
-          , ClosureValue $ \ [v] -> return ExitStatus
-          ] $
-    eval t
+  Fun [] [] t <- getFun (programStart p)
+  eval t
 
 run :: Program -> M a -> a
-run = undefined
+run p m = runM m [] []
 
 eval :: Term -> M Status
 eval t =
@@ -43,9 +42,8 @@ eval t =
       x <- getValue d
       xs <- mapM getValue ds
       closureValue x xs
- -- CallTerm Ident [Ident]
     CallTerm d1 d2s -> do
-      (d3s, t1) <- getFun d1
+      Fun d3s _ t1 <- getFun d1
       v2s <- mapM getValue d2s
       withEnv emptyEnv $
         bind d3s v2s $
@@ -82,24 +80,35 @@ eval t =
       bind d1s (tupleValues v2s) $
         eval t1
 
-type Env = ()
-
 emptyEnv :: Env
-emptyEnv = undefined
+emptyEnv = []
 
-getFun :: Ident -> M ([Ident], Term)
-getFun = undefined
+getFun :: Ident -> M Fun
+getFun d = do
+  xs <- getFuns
+  return $ fromMaybe (error "getFun") (lookup d xs)
 
 getValue :: Ident -> M Value
-getValue = undefined
+getValue d = do
+  r <- getEnv
+  return $ fromMaybe (error "getValue") (lookup d r)
 
 withEnv :: Env -> M a -> M a
-withEnv = undefined
+withEnv r m = M $ \ q _ -> runM m q r
 
 bind :: [Ident] -> [Value] -> M a -> M a
-bind = undefined
+bind ds vs m = M $ \ q r -> runM m q (zip ds vs ++ r)
+
+getFuns :: M [(Ident, Fun)]
+getFuns = M $ \ q r -> q
 
 getEnv :: M Env
-getEnv = undefined
+getEnv = M $ \ q r -> r
 
-type M a = [a]
+type Env = [(Ident, Value)]
+
+newtype M a = M { runM :: [(Ident, Fun)] -> Env -> a }
+
+instance Monad M where
+  return x = M $ \ _ _ -> x
+  m >>= f = M $ \ q r -> runM (f (runM m q r)) q r
