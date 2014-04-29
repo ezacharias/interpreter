@@ -33,5 +33,5 @@ data Term =
  | StringTerm Ident String Term
  | TupleTerm Ident [Ident] Term
  | UnreachableTerm
- | UntupleTerm [Ident] Term Term
+ | UntupleTerm [Ident] Ident Term
    deriving (Eq, Ord, Show)
