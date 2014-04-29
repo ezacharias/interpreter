@@ -16,73 +16,11 @@ convert p = run p $ do
   -- d  <- renameFunIdent (Simple.programMain p)
   return $ CPS.Program x1 x2 d
 
-createStartFun :: Simple.Ident -> M CPS.Ident
-createStartFun d1 = do
-  d2 <- gen
-  d3 <- gen
-  d4 <- gen
-  d5 <- gen
-  d6 <- gen
-  d7 <- gen
-  d8 <- gen
-  d9 <- gen
-  ty1 <- convertType (Simple.SumType 0)
-  i   <- getNormalResultIndex ty1
-  ty2 <- getHandlerType
-  ty3 <- getResultType
-  exportFun (d2
-            , CPS.Fun [] []
-              -- This is called with the Output type. It should pass it on to the handler.
-            $ CPS.LambdaTerm d3 [d4, d5] [ty1, ty2]
-                ( CPS.ConstructorTerm d6 d7 i [d4]
-                $ CPS.ApplyTerm d5 [d6]
-                )
-                -- This is called with the Result type.
-            $   CPS.LambdaTerm d8 [d9] [ty3]
-                  CPS.UnreachableTerm
-            $   CPS.CallTerm d1 [d3, d8]
-            )
-  return d2
-
 convertSum :: (Simple.Ident, Simple.Sum) -> M ()
 convertSum (d0, Simple.Sum tyss) = do
-  tyss' <- forM tyss $ \ tys ->
-             forM tys $ \ ty ->
-               convertType ty
+  tyss' <- mapM (mapM convertType) tyss
   d0' <- renameSumIdent d0
   exportSum (d0', CPS.Sum tyss')
-
-renameSumIdent :: Simple.Ident -> M CPS.Ident
-renameSumIdent d = do
-  xs <- get sumIdentRenames
-  case lookup d xs of
-    Nothing -> do
-      d' <- gen
-      set $ \ s -> s {sumIdentRenames = (d,d'):xs}
-      return d'
-    Just d' ->
-      return d'
-
-renameFunIdent :: Simple.Ident -> M CPS.Ident
-renameFunIdent d = do
-  xs <- get funIdentRenames
-  case lookup d xs of
-    Nothing -> do
-      d' <- gen
-      set $ \ s -> s {funIdentRenames = (d,d'):xs}
-      return d'
-    Just d' ->
-      return d'
-
-exportSum :: (CPS.Ident, CPS.Sum) -> M ()
-exportSum x = do
-  xs <- get programSums
-  set $ \ s -> s {programSums = x:xs}
-
-exportFun :: (CPS.Ident, CPS.Fun) -> M ()
-exportFun x = do
-  xs <- get programFuns
-  set $ \ s -> s {programFuns = x:xs}
 
 convertFun :: (Simple.Ident, Simple.Fun) -> M ()
 convertFun (d0, Simple.Fun ty0 t0) = do
@@ -93,9 +31,6 @@ convertFun (d0, Simple.Fun ty0 t0) = do
   ty1 <- convertType ty0
   ty2 <- getHandlerType
   exportFun (d1, CPS.Fun [d2, d3] [CPS.ArrowType [ty1, ty2], ty2] t1)
-
-run :: Simple.Program -> M CPS.Program -> CPS.Program
-run = undefined
 
 convertTerm :: Simple.Term -> H -> K -> M CPS.Term
 convertTerm t h k =
@@ -138,6 +73,17 @@ convertTerm t h k =
             return $ CPS.ConstructorTerm d4 d5 i [d3]
                    $ t2'
        in convertTerm t1 h' k'
+    Simple.ConcatenateTerm t1 t2 -> do
+      convertTerm t1 h $ \ h d1 ty1 -> do
+        convertTerm t2 h $ \ h d2 ty2 -> do
+          d3 <- gen
+          t3 <- k h d3 CPS.StringType
+          return $ CPS.ConcatenateTerm d3 d1 d2 t3
+    Simple.ConstructorTerm d1 i t1s -> do -- Ident Index [Term]
+      convertTerms t1s h $ \ h d1s ty1s -> do
+        d2 <- gen
+        t2 <- k h d2 (CPS.TupleType ty1s)
+        return $ CPS.TupleTerm d2 d1s t2
     Simple.FunTerm d1 -> do
       d2 <- renameFunIdent d1
       ty1 <- getFunType d1
@@ -170,22 +116,39 @@ convertTerm t h k =
           t2 <- h d3
           return $ CPS.ConstructorTerm d3 d4 i [d1, d2]
                  $ t2
+    Simple.TupleTerm t1s -> do
+      convertTerms t1s h $ \ h d1s ty1s -> do
+        d2 <- gen
+        t2 <- k h d2 (CPS.TupleType ty1s)
+        return $ CPS.TupleTerm d2 d1s t2
+    Simple.UnitTerm -> do
+      d <- gen
+      t <- k h d (CPS.TupleType [])
+      return $ CPS.TupleTerm d [] t
     Simple.UnreachableTerm _ -> do
       -- This should not take a type.
       return $ CPS.UnreachableTerm
+    Simple.UntupleTerm d1s t1 t2 -> do
+      d2s <- mapM (const gen) d1s
+      convertTerm t1 h $ \ h d1' ty1 -> do
+        CPS.TupleType ty1s <- return ty1
+        d1s' <- mapM (const gen) d1s
+        binds d1s d1s' ty1s $ do
+          t2' <- convertTerm t2 h k
+          return $ CPS.UntupleTerm d1s' d1' t2'
     Simple.VariableTerm d1 -> do
       (d2, ty2) <- lookupIdent d1
       k h d2 ty2
-    _ ->
-      undefined
 
-{-
- | ConcatenateTerm Term Term
- | ConstructorTerm Ident Index [Term]
- | TupleTerm [Term]
- | UnitTerm
- | UntupleTerm [Ident] Term Term
--}
+convertTerms :: [Simple.Term] -> H -> (H -> [CPS.Ident] -> [CPS.Type] -> M CPS.Term) -> M CPS.Term
+convertTerms [] h k = k h [] []
+convertTerms (t:ts) h k = do
+  convertTerm t h $ \ h d ty -> do
+    convertTerms ts h $ \ h ds tys -> do
+      k h (d:ds) (ty:tys)
+
+run :: Simple.Program -> M CPS.Program -> CPS.Program
+run = undefined
 
 convertType :: Simple.Type -> M CPS.Type
 convertType ty =
@@ -206,7 +169,9 @@ convertType ty =
       return $ CPS.SumType s1
 
 getRuleType :: CPS.Type -> ([Simple.Ident], Simple.Term) -> M CPS.Type
-getRuleType ty (ds, t) = undefined
+getRuleType ty (ds, t) = do
+  CPS.SumType d1 <- return ty
+  undefined
 
 getTermType :: Simple.Term -> M CPS.Type
 getTermType t = undefined
@@ -315,6 +280,11 @@ getResultType = do
 
 bind :: Simple.Ident -> CPS.Ident -> CPS.Type -> M a -> M a
 bind d1 d2 ty2 = with (\ r -> r {localBindings = (d1, (d2, ty2)) : localBindings r})
+
+binds :: [Simple.Ident] -> [CPS.Ident] -> [CPS.Type] -> M a -> M a
+binds [] [] [] m = m
+binds (d1:d1s) (d2:d2s) (ty1:ty1s) m = bind d1 d2 ty1 $ binds d1s d2s ty1s m
+binds _ _ _ _ = undefined
 
 lookupIdent :: Simple.Ident -> M (CPS.Ident, CPS.Type)
 lookupIdent d = do
@@ -447,6 +417,65 @@ getTagTypes = undefined
 getNormalTypes :: M [CPS.Type]
 getNormalTypes = undefined
 
+createStartFun :: Simple.Ident -> M CPS.Ident
+createStartFun d1 = do
+  d2 <- gen
+  d3 <- gen
+  d4 <- gen
+  d5 <- gen
+  d6 <- gen
+  d7 <- gen
+  d8 <- gen
+  d9 <- gen
+  ty1 <- convertType (Simple.SumType 0)
+  i   <- getNormalResultIndex ty1
+  ty2 <- getHandlerType
+  ty3 <- getResultType
+  exportFun (d2
+            , CPS.Fun [] []
+              -- This is called with the Output type. It should pass it on to the handler.
+            $ CPS.LambdaTerm d3 [d4, d5] [ty1, ty2]
+                ( CPS.ConstructorTerm d6 d7 i [d4]
+                $ CPS.ApplyTerm d5 [d6]
+                )
+                -- This is called with the Result type.
+            $   CPS.LambdaTerm d8 [d9] [ty3]
+                  CPS.UnreachableTerm
+            $   CPS.CallTerm d1 [d3, d8]
+            )
+  return d2
+
+renameSumIdent :: Simple.Ident -> M CPS.Ident
+renameSumIdent d = do
+  xs <- get sumIdentRenames
+  case lookup d xs of
+    Nothing -> do
+      d' <- gen
+      set $ \ s -> s {sumIdentRenames = (d,d'):xs}
+      return d'
+    Just d' ->
+      return d'
+
+renameFunIdent :: Simple.Ident -> M CPS.Ident
+renameFunIdent d = do
+  xs <- get funIdentRenames
+  case lookup d xs of
+    Nothing -> do
+      d' <- gen
+      set $ \ s -> s {funIdentRenames = (d,d'):xs}
+      return d'
+    Just d' ->
+      return d'
+
+exportSum :: (CPS.Ident, CPS.Sum) -> M ()
+exportSum x = do
+  xs <- get programSums
+  set $ \ s -> s {programSums = x:xs}
+
+exportFun :: (CPS.Ident, CPS.Fun) -> M ()
+exportFun x = do
+  xs <- get programFuns
+  set $ \ s -> s {programFuns = x:xs}
 
 -- Utility Functions
 
