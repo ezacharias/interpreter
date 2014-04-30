@@ -86,8 +86,9 @@ convertTerm t h k =
     Simple.ConstructorTerm d1 i t1s -> do -- Ident Index [Term]
       convertTerms t1s h $ \ h d1s ty1s -> do
         d2 <- gen
-        t2 <- k h d2 (CPS.TupleType ty1s)
-        return $ CPS.TupleTerm d2 d1s t2
+        d3 <- renameSumIdent d1
+        t2 <- k h d2 (CPS.SumType d3)
+        return $ CPS.ConstructorTerm d2 d3 i d1s t2
     Simple.FunTerm d1 -> do
       d2 <- renameFunIdent d1
       ty1 <- getFunType d1
@@ -241,11 +242,12 @@ run p m = runM m2 s r k
         k x _ = x
         m2 = do
           d1 <- gen
-          xs1 <- forM (Simple.programTags p) $ \ (d, Simple.Tag ty1 ty2) -> do
+          xs1 <- forM (zip [0..] (Simple.programTags p)) $ \ (i, (d, Simple.Tag ty1 ty2)) -> do
                    ty1 <- convertType ty1
                    ty2 <- convertType ty2
-                   return (d, (ty1, ty2))
-          xs2 <- forM (zip (Simple.programRess p) [0..]) $ \ (ty, i) -> do
+                   return (d, (i, (ty1, ty2)))
+          n <- return $ length xs1
+          xs2 <- forM (zip (Simple.programRess p) [n..]) $ \ (ty, i) -> do
                    ty <- convertType ty
                    return (ty, i)
           xs3 <- forM (Simple.programFuns p) $ \ (d, Simple.Fun ty _) -> do
@@ -270,7 +272,7 @@ instance Monad (M' b) where
   m >>= f = M $ \ s r k -> runM m s r $ \ x s -> runM (f x) s r k
 
 data Reader = R { resultIdent :: CPS.Ident
-                , tagTypePairs :: [(Simple.Ident, (CPS.Type, CPS.Type))]
+                , tagTypePairs :: [(Simple.Ident, (Int, (CPS.Type, CPS.Type)))]
                 , normalResultIndexes :: [(CPS.Type, Int)]
                 , funTypes :: [(Simple.Ident, CPS.Type)]
                 , localBindings :: [(Simple.Ident, (CPS.Ident, CPS.Type))]
@@ -397,7 +399,7 @@ createRules d0 d1 ty1 sd kd hd = do
   (ty2, ty3) <- getTag d1
   sty <- return $ CPS.SumType sd
   xs <- getTagTypes
-  xs' <- forM xs $ \ (d2, i1, ty2, ty3) ->
+  xs' <- forM xs $ \ (d2, (i1, (ty2, ty3))) ->
            if d1 == d2
              then do
                d3 <- gen
@@ -459,13 +461,16 @@ getStreamTypeIdent ty1 ty2 ty3 = todo "getStreamTypeIdent"
 getTag :: CPS.Ident -> M (CPS.Type, CPS.Type)
 getTag d = do
   xs <- look tagTypePairs
-  return $ fromMaybe (unreachable $ "getTag: " ++ show d) $ lookup d xs
+  return $ snd $ fromMaybe (unreachable $ "getTag: " ++ show d) $ lookup d xs
 
-getTagTypes :: M [(CPS.Ident, CPS.Index, CPS.Type, CPS.Type)]
-getTagTypes = todo "getTagTypes"
+getTagTypes :: M [(CPS.Ident, (CPS.Index, (CPS.Type, CPS.Type)))]
+getTagTypes = do
+  look tagTypePairs
 
 getNormalTypes :: M [CPS.Type]
-getNormalTypes = todo "getNormalTypes"
+getNormalTypes = do
+  xs <- look normalResultIndexes
+  return $ map fst xs
 
 createStartFun :: Simple.Ident -> M CPS.Ident
 createStartFun d1 = do
@@ -508,11 +513,11 @@ createOutputHandler = do
   d5 <- gen
   exportFun ( d1
             , CPS.Fun [d2] [ty2]
-            $ CPS.CaseTerm d2
-                [ ([], CPS.ExitTerm)
-                , ([d3, d4], CPS.WriteTerm d3 (CPS.CallTerm d1 [d4]))
-                , ([d5], todo "createOutputHandler")
-                ]
+            $   CPS.CaseTerm d2
+                  [ ([], CPS.ExitTerm)
+                  , ([d3, d4], CPS.WriteTerm d3 (CPS.CallTerm d1 [d4]))
+                  , ([d5], CPS.UnreachableTerm) -- todo "createOutputHandler")
+                  ]
             )
   return d1
 
@@ -520,7 +525,7 @@ createStartRules :: M [([CPS.Ident], CPS.Term)]
 createStartRules = do
   d0 <- createOutputHandler
   xs <- getTagTypes
-  xs' <- forM xs $ \ (_, _, _, _) -> do
+  xs' <- forM xs $ \ (_, (_, (_, _))) -> do
            d1 <- gen
            d2 <- gen
            return ([d1, d2], CPS.UnreachableTerm)

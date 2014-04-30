@@ -22,9 +22,9 @@ data Value =
 
 instance Show Value where
   show (ClosureValue _) = "closure"
-  show (ConstructorValue i vs) = "constructor " ++ show i ++ " " ++ show (length vs)
+  show (ConstructorValue i vs) = "constructor " ++ show i ++ " " ++ show vs
   show (StringValue s) = s
-  show (TupleValue vs) = show (length vs)
+  show (TupleValue vs) = show vs
   show UnitValue = "()"
 
 interpret :: Program -> Status
