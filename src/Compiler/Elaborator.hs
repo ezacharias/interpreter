@@ -66,11 +66,26 @@ getSum q = do
       case q of
         Path [Name "Output" []] -> do
           set (\ s -> s {exportedSums = Map.insert q 0 x})
+          x <- get programSums
+          set (\ s -> s {programSums = (0, Simple.Sum
+                                             [ []
+                                             , [Simple.StringType, Simple.SumType 0]
+                                             , [Simple.ArrowType Simple.UnitType (Simple.SumType 0)]
+                                             ]
+                                       ) : x})
           return 0
         -- We need to do more here.
         Path [Name "Stream" [ty1, ty2, ty3]] -> do
           d <- gen
           set (\ s -> s {exportedSums = Map.insert q d x})
+          x <- get programSums
+          ty1 <- elaborateType ty1
+          ty2 <- elaborateType ty2
+          ty3 <- elaborateType ty3
+          set (\ s -> s {programSums = (d, Simple.Sum
+                                             [ [ty3]
+                                             , [ty1, Simple.ArrowType ty2 (Simple.SumType d)]
+                                             ]) : x})
           return d
         _ -> do
           d <- gen
@@ -88,6 +103,12 @@ getTag q = do
       d <- gen
       -- It is necessary to set the exported ident before any further work.
       set (\ s -> s {exportedTags = Map.insert q d x})
+      ty1 <- getTypeVariable "a"
+      ty1 <- elaborateType ty1
+      ty2 <- getTypeVariable "b"
+      ty2 <- elaborateType ty2
+      x <- get programTags
+      set (\ s -> s {programTags = (d, Simple.Tag ty1 ty2) : x})
       return d
 
 -- If we use a constructor as a function or in a pattern we must make sure the
@@ -282,7 +303,7 @@ primitiveCatch tag d ty3 = do
   addFun d $ Simple.Fun (Simple.ArrowType (Simple.ArrowType Simple.UnitType ty3)
                                           (Simple.SumType d2))
                (Simple.LambdaTerm d3 (Simple.ArrowType Simple.UnitType ty3)
-                 (Simple.CatchTerm tag d2
+                 (Simple.CatchTerm tag d2 ty3
                    (Simple.ApplyTerm (Simple.VariableTerm d3) Simple.UnitTerm)))
 
 elaborateType :: Type -> M Simple.Type

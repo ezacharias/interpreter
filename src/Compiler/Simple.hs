@@ -50,10 +50,10 @@ data Type =
 --
 -- Binds a variable to a value in the final term.
 --
---   CatchTerm tag ident term
+--   CatchTerm tag ident type term
 --
 -- Evaluates term. Returns a stream of type ident. If it escapes with tag,
--- returns Next. Otherwise returns End.
+-- returns Next. Otherwise returns End. Type is the type of the body.
 --
 --   ConcatenateTerm
 --
@@ -103,7 +103,7 @@ data Term =
    ApplyTerm Term Term
  | BindTerm Ident Term Term
  | CaseTerm Term [([Ident], Term)]
- | CatchTerm Ident Ident Term
+ | CatchTerm Ident Ident Type Term
  | ConcatenateTerm Term Term
  | ConstructorTerm Ident Index [Term]
  | FunTerm Ident

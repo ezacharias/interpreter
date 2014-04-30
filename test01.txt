@@ -2,18 +2,29 @@ The minimial program.
 
 
     Main : Output
-      Write(“OK”)(Continue(F))
+      IO.With(F)
 
-    F() : Output
-      Write(“Hi”)(Write(“Bye”)(Continue(G)))
+    F() : ()
+      IO.Print(“Hi”)
+      IO.Print(“Bye”)
+      IO.Print(“OK”)
 
-    G() : Output
-      Write(“Z”)(Exit)
+    mod IO
 
-    sum Maybe⟦a⟧
-      Nothing
-      Something(a)
+      new E = Escape⟦String, ()⟧
 
-    sum Bool
-      False
-      True
+      With(f : () ⟶ ()) : Output
+        Loop(E.Catch(f))
+
+      Loop(s : Stream⟦String, (), ()⟧) : Output
+        case s
+          End()
+            Exit
+          Next(x)(k)
+            Write(x)(Continue(Compose(Loop)(k)))
+
+      Print(x : String) : ()
+        E.Throw(x)
+
+    Compose⟦a, b, c⟧(f : b ⟶ c)(g : a ⟶ b)(x : a) : c
+      f(g(x))

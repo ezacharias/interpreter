@@ -56,7 +56,7 @@ eval t =
       v <- eval t1
       let (ds, t2) = rs !! constructorIndex v
       bind (zip ds (constructorValues v)) (eval t2)
-    CatchTerm d1 _ t1 ->
+    CatchTerm d1 _ _ t1 ->
       catch d1 (eval t1)
     ConcatenateTerm t1 t2 -> do
       v1 <- eval t1

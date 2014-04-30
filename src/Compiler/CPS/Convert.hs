@@ -8,6 +8,7 @@ import qualified Compiler.Simple as Simple
 
 convert :: Simple.Program -> CPS.Program
 convert p = run p $ do
+--  _ <- error $ show (Simple.programTags p)
   mapM_ convertSum (Simple.programSums p)
   mapM_ convertFun (Simple.programFuns p)
   d  <- createStartFun (Simple.programMain p)
@@ -55,15 +56,16 @@ convertTerm t h k =
           createKClosure k ty2 $ \ d5 _ ->
             return $ CPS.BindTerm d3 d5
                    $ CPS.CaseTerm d1 c1s'
-    Simple.CatchTerm d1 d2 t1 ->
+    Simple.CatchTerm d1 d2 ty1 t1 ->
       -- We have to begin here, which handles the catch. I think it should
       -- very nearly simply call the function with h, k, and the result, which
       -- would be easy.
       let h' d3 = do
+            d2 <- renameSumIdent d2
             -- The type given to K is the stream type.
-            createKClosure k (CPS.SumType d2) $ \ d6 _ ->
+            createKClosure k (CPS.SumType d2) $ \ d6 _ -> do
               createHClosure h $ \ d7 -> do
-                ty1 <- getKType
+                ty1 <- convertType ty1
                 d8 <- createHandlerFunction d1 ty1 d2
                 return $ CPS.CallTerm d8 [d3, d6, d7]
           k' h d3 ty3 = do
@@ -111,13 +113,12 @@ convertTerm t h k =
       d1 <- gen
       t1 <- k h d1 CPS.StringType
       return $ CPS.StringTerm d1 s1 t1
-    Simple.ThrowTerm d1 t1 ->
+    Simple.ThrowTerm d0 t1 ->
       convertTerm t1 h $ \ h d1 ty1 -> do
-        ty2 <- getTagResultType d1
+        (ty2, i) <- getTagResultTypeAndThrowIndex d0
         createKClosure k ty2 $ \ d2 _ -> do
           d3 <- gen
           d4 <- getResultTypeIdent
-          i <- getThrowIndex d1
           t2 <- h d3
           return $ CPS.ConstructorTerm d3 d4 i [d1, d2]
                  $ t2
@@ -167,8 +168,9 @@ convertType ty =
       return $ CPS.TupleType tys'
     Simple.UnitType ->
       return $ CPS.TupleType []
-    Simple.SumType s1 ->
-      return $ CPS.SumType s1
+    Simple.SumType d1 -> do
+      d1' <- renameSumIdent d1
+      return $ CPS.SumType d1'
 
 getHandlerType :: M CPS.Type
 getHandlerType = do
@@ -336,11 +338,6 @@ lookupIdent d = do
   xs <- look localBindings
   return $ fromMaybe (unreachable $ "lookupIdent: " ++ show d) $ lookup d xs
 
-
--- Returns the constructor index for the tag.
-getThrowIndex :: Simple.Ident -> M CPS.Index
-getThrowIndex d = todo "getThrowIndex"
-
 -- Note that this is a Simple.Ident and not a CPS.Ident. This is just the type
 -- of the result of the term.
 getFunType :: Simple.Ident -> M CPS.Type
@@ -358,8 +355,11 @@ getNormalResultIndex ty = do
   xs <- look normalResultIndexes
   return $ fromMaybe (unreachable $ "getNormalResultIndex: " ++ show ty) $ lookup ty xs
 
-getTagResultType :: CPS.Ident -> M CPS.Type
-getTagResultType d = todo "getTagResultType"
+getTagResultTypeAndThrowIndex :: CPS.Ident -> M (CPS.Type, Int)
+getTagResultTypeAndThrowIndex d = do -- todo "getTagResultType"
+  xs <- look tagTypePairs
+  (i, (_, ty)) <- return $ fromMaybe (unreachable $ "getTagResultType: " ++ show d) (lookup d xs)
+  return (ty, i)
 
 makeNormalResult :: CPS.Type -> H -> K -> M ([CPS.Ident], CPS.Term)
 makeNormalResult ty1 h k = do
@@ -440,7 +440,7 @@ createRules d0 d1 ty1 sd kd hd = do
                       )
   ys <- getNormalTypes
   ys' <- forM ys $ \ ty2 ->
-           if CPS.SumType sd == ty2
+           if ty1 == ty2
              then do
                d3 <- gen
                d4 <- gen
@@ -616,7 +616,7 @@ getSumTypes :: CPS.Type -> M [[CPS.Type]]
 getSumTypes ty = do
   CPS.SumType d <- return ty
   xs <- get programSums
-  CPS.Sum tyss <- return $ fromMaybe (unreachable $ "getSumTypes: " ++ show d) $ lookup d xs
+  CPS.Sum tyss <- return $ fromMaybe (unreachable $ "getSumTypes: " ++ show d ++ show xs) $ lookup d xs
   return tyss
 
 -- Utility Functions
