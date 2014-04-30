@@ -19,6 +19,7 @@ type IdentMap = IdentMap.IntMap
 -- elaborated, which will in turn add more work to the work queue and so on.
 elaborate :: Syntax.Program -> Simple.Program
 elaborate p = run $ do
+  addRes $ Simple.SumType 0
   d <- getFun $ Path [Name "Main" []]
   finish p
   x1 <- get programTags

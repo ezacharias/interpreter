@@ -3,19 +3,21 @@
 module Compiler.Driver where
 
 import           Control.Monad
-import           System.Exit            (exitFailure)
+import           System.Exit              (exitFailure)
 import           System.IO
 
-import qualified Compiler.Elaborator    as Elaborator
-import qualified Compiler.Interpreter   as Interpreter
-import qualified Compiler.Meta          as Meta
+import qualified Compiler.CPS             as CPS
+import qualified Compiler.CPS.Convert     as CPS.Convert
+import qualified Compiler.CPS.Interpreter as Interpreter
+import qualified Compiler.Elaborator      as Elaborator
+import qualified Compiler.Meta            as Meta
 import           Compiler.Parser
-import qualified Compiler.Simple        as Simple
-import qualified Compiler.Syntax        as Syntax
-import qualified Compiler.SyntaxChecker as SyntaxChecker
+import qualified Compiler.Simple          as Simple
+import qualified Compiler.Syntax          as Syntax
+import qualified Compiler.SyntaxChecker   as SyntaxChecker
 import           Compiler.Token
 import           Compiler.Tokenizer
-import qualified Compiler.TypeChecker   as TypeChecker
+import qualified Compiler.TypeChecker     as TypeChecker
 
 data Driver a = DriverReturn a
               | DriverPerformIO (IO (Driver a))
@@ -37,7 +39,7 @@ liftIO io = DriverPerformIO (liftM return io)
 
 -- | Takes a filename and interprets the file.
 interpreter :: String -> Driver ()
-interpreter = parse >=> foo >=> syntaxCheck >=> foo >=> typeCheck >=> foo >=> elaborate >=> foo >=> interpret
+interpreter = parse >=> foo >=> syntaxCheck >=> foo >=> typeCheck >=> foo >=> elaborate >=> foo >=> cpsConvert >=> foo >=> interpret
 
 foo :: Show a => a -> Driver a
 foo x = liftIO (writeFile "/dev/null" (show x)) >> return x
@@ -95,7 +97,10 @@ typeCheck x = check $ TypeChecker.inferProgram (Meta.addMetavariables x)
 elaborate :: Syntax.Program -> Driver Simple.Program
 elaborate x = return $ Elaborator.elaborate x
 
-interpret :: Simple.Program -> Driver ()
+cpsConvert :: Simple.Program -> Driver CPS.Program
+cpsConvert x = return $ CPS.Convert.convert x
+
+interpret :: CPS.Program -> Driver ()
 interpret p = check $ Interpreter.interpret p
   where check Interpreter.ExitStatus         = return ()
         check (Interpreter.EscapeStatus _ _) = DriverError "interpreter resulted in an uncaught throw"

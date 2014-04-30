@@ -13,7 +13,6 @@ convert p = run p $ do
   d  <- createStartFun (Simple.programMain p)
   x1 <- get programSums
   x2 <- get programFuns
-  -- d  <- renameFunIdent (Simple.programMain p)
   return $ CPS.Program x1 x2 d
 
 convertSum :: (Simple.Ident, Simple.Sum) -> M ()
@@ -129,6 +128,7 @@ convertTerm t h k =
       -- This should not take a type.
       return $ CPS.UnreachableTerm
     Simple.UntupleTerm d1s t1 t2 -> do
+      _ <- todo "untup"
       d2s <- mapM (const gen) d1s
       convertTerm t1 h $ \ h d1' ty1 -> do
         CPS.TupleType ty1s <- return ty1
@@ -146,9 +146,6 @@ convertTerms (t:ts) h k = do
   convertTerm t h $ \ h d ty -> do
     convertTerms ts h $ \ h ds tys -> do
       k h (d:ds) (ty:tys)
-
-run :: Simple.Program -> M CPS.Program -> CPS.Program
-run = undefined
 
 convertType :: Simple.Type -> M CPS.Type
 convertType ty =
@@ -171,10 +168,28 @@ convertType ty =
 getRuleType :: CPS.Type -> ([Simple.Ident], Simple.Term) -> M CPS.Type
 getRuleType ty (ds, t) = do
   CPS.SumType d1 <- return ty
-  undefined
+  return $ todo "getRuleType"
 
 getTermType :: Simple.Term -> M CPS.Type
-getTermType t = undefined
+getTermType t = return $ todo "getTermType"
+        {-
+   ApplyTerm
+ | BindTerm Ident Term Term
+ | CaseTerm Term [([Ident], Term)]
+ | CatchTerm Ident Ident Term
+ | ConcatenateTerm Term Term
+ | ConstructorTerm Ident Index [Term]
+ | FunTerm Ident
+ | LambdaTerm Ident Type Term
+ | StringTerm String
+ | ThrowTerm Ident Term
+ | TupleTerm [Term]
+ | UnitTerm
+ | UnreachableTerm Type
+ | UntupleTerm [Ident] Term Term
+ | VariableTerm Ident
+   deriving (Eq, Ord, Show)
+        -}
 
 getHandlerType :: M CPS.Type
 getHandlerType = do
@@ -191,8 +206,11 @@ createK d1 h d2 _ =
 
 convertRule :: H -> K -> ([Simple.Ident], Simple.Term) -> M ([CPS.Ident], CPS.Term)
 convertRule h k (d1s, t1) = do
-  t1' <- convertTerm t1 h k
-  return (d1s, t1')
+  d1s' <- mapM (const gen) d1s
+  ty1s <- mapM (const (return $ todo "convertRule")) d1s
+  binds d1s d1s' ty1s $ do
+    t1' <- convertTerm t1 h k
+    return (d1s', t1')
 
 -- Eta-reduce the K closure if possibe.
 createKClosure :: K -> CPS.Type -> (CPS.Ident -> CPS.Type -> M CPS.Term) -> M CPS.Term
@@ -227,6 +245,40 @@ arrowTypeResult :: CPS.Type -> CPS.Type
 arrowTypeResult (CPS.ArrowType [_, CPS.ArrowType [ty, _], _]) = ty
 arrowTypeResult _ = error "arrowTypeResult"
 
+run :: Simple.Program -> M CPS.Program -> CPS.Program
+run p m = runM m2 s r k
+  where s = S { genInt = 1000
+              , programSums = []
+              , programFuns = []
+              , sumIdentRenames = []
+              , funIdentRenames = []
+              }
+        r = R { resultIdent = 0
+              , tagTypePairs = []
+              , normalResultIndexes = []
+              , funTypes = []
+              , localBindings = []
+              }
+        k x _ = x
+        m2 = do
+          d1 <- gen
+          xs1 <- forM (Simple.programTags p) $ \ (d, Simple.Tag ty1 ty2) -> do
+                   ty1 <- convertType ty1
+                   ty2 <- convertType ty2
+                   return (d, (ty1, ty2))
+          xs2 <- forM (zip (Simple.programRess p) [0..]) $ \ (ty, i) -> do
+                   ty <- convertType ty
+                   return (ty, i)
+          xs3 <- forM (Simple.programFuns p) $ \ (d, Simple.Fun ty _) -> do
+                   ty <- convertType ty
+                   return (d, ty)
+          with (\ r -> r { resultIdent = d1
+                         , tagTypePairs = xs1
+                         , normalResultIndexes = xs2
+                         , funTypes = xs3
+                         })
+            m
+
 type K = H -> CPS.Ident -> CPS.Type -> M CPS.Term
 type H = CPS.Ident -> M CPS.Term
 
@@ -239,6 +291,9 @@ instance Monad (M' b) where
   m >>= f = M $ \ s r k -> runM m s r $ \ x s -> runM (f x) s r k
 
 data Reader = R { resultIdent :: CPS.Ident
+                , tagTypePairs :: [(Simple.Ident, (CPS.Type, CPS.Type))]
+                , normalResultIndexes :: [(CPS.Type, Int)]
+                , funTypes :: [(Simple.Ident, CPS.Type)]
                 , localBindings :: [(Simple.Ident, (CPS.Ident, CPS.Type))]
                 }
 
@@ -284,32 +339,37 @@ bind d1 d2 ty2 = with (\ r -> r {localBindings = (d1, (d2, ty2)) : localBindings
 binds :: [Simple.Ident] -> [CPS.Ident] -> [CPS.Type] -> M a -> M a
 binds [] [] [] m = m
 binds (d1:d1s) (d2:d2s) (ty1:ty1s) m = bind d1 d2 ty1 $ binds d1s d2s ty1s m
-binds _ _ _ _ = undefined
+binds _ _ _ _ = unreachable "binds"
 
 lookupIdent :: Simple.Ident -> M (CPS.Ident, CPS.Type)
 lookupIdent d = do
   xs <- look localBindings
-  return $ fromMaybe (undefined) $ lookup d xs
+  return $ fromMaybe (unreachable $ "lookupIdent: " ++ show d) $ lookup d xs
 
 
 -- Returns the constructor index for the tag.
 getThrowIndex :: Simple.Ident -> M CPS.Index
-getThrowIndex d = undefined
+getThrowIndex d = todo "getThrowIndex"
 
--- Note that this is a Simple.Ident and not a CPS.Ident.
+-- Note that this is a Simple.Ident and not a CPS.Ident. This is just the type
+-- of the result of the term.
 getFunType :: Simple.Ident -> M CPS.Type
-getFunType = undefined
+getFunType d = do
+  xs <- look funTypes
+  return $ fromMaybe (unreachable "getFunType") $ lookup d xs
 
 -- The first set is every possible normal result type. The second set is every
 -- possible tag result.
 getStandardRules :: M [([CPS.Ident], CPS.Term)]
-getStandardRules = undefined
+getStandardRules = todo "getStandartRules"
 
 getNormalResultIndex :: CPS.Type -> M CPS.Index
-getNormalResultIndex ty = undefined
+getNormalResultIndex ty = do
+  xs <- look normalResultIndexes
+  return $ fromMaybe (unreachable $ "getNormalResultIndex: " ++ show ty) $ lookup ty xs
 
 getTagResultType :: CPS.Ident -> M CPS.Type
-getTagResultType d = undefined
+getTagResultType d = todo "getTagResultType"
 
 makeNormalResult :: CPS.Type -> H -> K -> M ([CPS.Ident], CPS.Term)
 makeNormalResult ty1 h k = do
@@ -406,19 +466,22 @@ createRules d0 d1 ty1 sd kd hd = do
   return $ xs' ++ ys'
 
 getStreamTypeIdent :: CPS.Type -> CPS.Type -> CPS.Type -> M CPS.Ident
-getStreamTypeIdent ty1 ty2 ty3 = undefined
+getStreamTypeIdent ty1 ty2 ty3 = todo "getStreamTypeIdent"
 
 getTag :: CPS.Ident -> M (CPS.Type, CPS.Type)
-getTag d1 = undefined
+getTag d = do
+  xs <- look tagTypePairs
+  return $ fromMaybe (unreachable $ "getTag: " ++ show d) $ lookup d xs
 
 getTagTypes :: M [(CPS.Ident, CPS.Index, CPS.Type, CPS.Type)]
-getTagTypes = undefined
+getTagTypes = todo "getTagTypes"
 
 getNormalTypes :: M [CPS.Type]
-getNormalTypes = undefined
+getNormalTypes = todo "getNormalTypes"
 
 createStartFun :: Simple.Ident -> M CPS.Ident
 createStartFun d1 = do
+  d1 <- renameFunIdent d1
   d2 <- gen
   d3 <- gen
   d4 <- gen
@@ -431,7 +494,7 @@ createStartFun d1 = do
   i   <- getNormalResultIndex ty1
   ty2 <- getHandlerType
   ty3 <- getResultType
-  exportFun (d2
+  exportFun ( d2
             , CPS.Fun [] []
               -- This is called with the Output type. It should pass it on to the handler.
             $ CPS.LambdaTerm d3 [d4, d5] [ty1, ty2]
@@ -483,3 +546,9 @@ substitute :: Int -> a -> [a] -> [a]
 substitute 0 x (_ : ys) = x : ys
 substitute n x (y : ys) = y : substitute (n-1) x ys
 substitute n x []       = error "substitute out of bounds"
+
+todo :: String -> a
+todo s = error $ "todo: CPS.Convert." ++ s
+
+unreachable :: String -> a
+unreachable s = error $ "unreachable: CPS.Convert." ++ s

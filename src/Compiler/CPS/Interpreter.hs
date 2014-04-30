@@ -33,7 +33,7 @@ interpret p = run p $ do
   eval t
 
 run :: Program -> M a -> a
-run p m = runM m [] []
+run p m = runM m (programFuns p) []
 
 eval :: Term -> M Status
 eval t =
@@ -86,12 +86,12 @@ emptyEnv = []
 getFun :: Ident -> M Fun
 getFun d = do
   xs <- getFuns
-  return $ fromMaybe (error "getFun") (lookup d xs)
+  return $ fromMaybe (unreachable $ "getFun: " ++ show d) (lookup d xs)
 
 getValue :: Ident -> M Value
 getValue d = do
   r <- getEnv
-  return $ fromMaybe (error "getValue") (lookup d r)
+  return $ fromMaybe (unreachable "getValue") (lookup d r)
 
 withEnv :: Env -> M a -> M a
 withEnv r m = M $ \ q _ -> runM m q r
@@ -112,3 +112,11 @@ newtype M a = M { runM :: [(Ident, Fun)] -> Env -> a }
 instance Monad M where
   return x = M $ \ _ _ -> x
   m >>= f = M $ \ q r -> runM (f (runM m q r)) q r
+
+-- Utility Functions
+
+todo :: String -> a
+todo s = error $ "todo: CPS.Interpreter." ++ s
+
+unreachable :: String -> a
+unreachable s = error $ "unreachable: CPS.Interpreter." ++ s
