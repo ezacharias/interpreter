@@ -487,7 +487,7 @@ createStartFun d1 = do
   i   <- getNormalResultIndex ty1
   ty2 <- getHandlerType
   ty3 <- getResultType
-  c1s <- createStartRules
+  d10 <- createStartHandler
   exportFun ( d2
             , CPS.Fun [] []
               -- This is called with the Output type. It should pass it on to the handler.
@@ -498,32 +498,71 @@ createStartFun d1 = do
                 -- This is called with the Result type.
             $   CPS.LambdaTerm d8 [d9] [ty3]
                   -- CPS.UnreachableTerm
-                  (CPS.CaseTerm d9 c1s)
+                  (CPS.CallTerm d10 [d9])
             $   CPS.CallTerm d1 [d3, d8]
             )
   return d2
 
-createOutputHandler :: M CPS.Ident
-createOutputHandler = do
+createStartHandler :: M CPS.Ident
+createStartHandler = do
+  d1 <- gen
+  d2 <- gen
+  ty2 <- getResultType
+  c1s <- createStartRules d1
+  exportFun ( d1
+            , CPS.Fun [d2] [ty2]
+            $   CPS.CaseTerm d2 c1s
+            )
+  return d1
+
+createOutputHandler :: CPS.Ident -> M CPS.Ident
+createOutputHandler d0 = do
   d1 <- gen
   d2 <- gen
   ty2 <- convertType (Simple.SumType 0)
   d3 <- gen
   d4 <- gen
   d5 <- gen
+  t1 <- createApply d0 d5
   exportFun ( d1
             , CPS.Fun [d2] [ty2]
             $   CPS.CaseTerm d2
                   [ ([], CPS.ExitTerm)
                   , ([d3, d4], CPS.WriteTerm d3 (CPS.CallTerm d1 [d4]))
-                  , ([d5], CPS.UnreachableTerm) -- todo "createOutputHandler")
+                  , ([d5], t1)
                   ]
             )
   return d1
 
-createStartRules :: M [([CPS.Ident], CPS.Term)]
-createStartRules = do
-  d0 <- createOutputHandler
+createApply :: CPS.Ident -> CPS.Ident -> M CPS.Term
+createApply d0 d1 = do
+  d2 <- gen
+  d3 <- gen
+  d4 <- gen
+  d5 <- gen
+  d6 <- gen
+  d7 <- gen
+  d8 <- gen
+  d9 <- gen
+  ty1 <- convertType (Simple.SumType 0)
+  i   <- getNormalResultIndex ty1
+  ty2 <- getHandlerType
+  ty3 <- getResultType
+  return $ CPS.LambdaTerm d2 [d3, d4] [ty1, ty2]
+             ( CPS.ConstructorTerm d5 d6 i [d3]
+             $ CPS.ApplyTerm d4 [d5]
+             )
+             -- This is called with the Result type.
+         $   CPS.LambdaTerm d7 [d8] [ty3]
+               -- CPS.UnreachableTerm
+               (CPS.CallTerm d0 [d8])
+         $   CPS.TupleTerm d9 []
+         $   CPS.ApplyTerm d1 [d9, d2, d7]
+
+
+createStartRules :: CPS.Ident -> M [([CPS.Ident], CPS.Term)]
+createStartRules d1 = do
+  d0 <- createOutputHandler d1
   xs <- getTagTypes
   xs' <- forM xs $ \ (_, (_, (_, _))) -> do
            d1 <- gen

@@ -2,4 +2,18 @@ The minimial program.
 
 
     Main : Output
-      Exit
+      Write(“OK”)(Continue(F))
+
+    F() : Output
+      Write(“Hi”)(Write(“Bye”)(Continue(G)))
+
+    G() : Output
+      Write(“Z”)(Exit)
+
+    sum Maybe⟦a⟧
+      Nothing
+      Something(a)
+
+    sum Bool
+      False
+      True
