@@ -42,6 +42,10 @@ eval t =
       x <- getValue d
       xs <- mapM getValue ds
       closureValue x xs
+    BindTerm d1 d2 t1 -> do
+      v2 <- getValue d2
+      bind [d1] [v2] $
+        eval t1
     CallTerm d1 d2s -> do
       Fun d3s _ t1 <- getFun d1
       v2s <- mapM getValue d2s
@@ -62,6 +66,8 @@ eval t =
       v3s <- mapM getValue d3s
       bind [d1] [ConstructorValue i1 v3s] $
         eval t1
+    ExitTerm ->
+      return ExitStatus
     LambdaTerm d ds _ t1 t2 -> do
       r <- getEnv
       bind [d] [ClosureValue (\ vs -> withEnv r (bind ds vs (eval t1)))] $
@@ -73,6 +79,10 @@ eval t =
       v2s <- mapM getValue d2s
       bind [d1] [TupleValue v2s] $
         eval t1
+    WriteTerm d1 t1 -> do
+      v1 <- getValue d1
+      x1 <- eval t1
+      return $ WriteStatus (stringValue v1) x1
     UnreachableTerm ->
       return UndefinedStatus
     UntupleTerm d1s d2 t1 -> do

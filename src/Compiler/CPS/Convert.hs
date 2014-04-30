@@ -46,11 +46,15 @@ convertTerm t h k =
           convertTerm t3 h k
     Simple.CaseTerm t1 c1s -> do
       convertTerm t1 h $ \ h d1 ty1 -> do
-        ty2 <- getRuleType ty1 (head c1s)
-        createKClosure k ty2 $ \ d3 _ ->
-          createHClosure h $ \ d4 -> do
-            c1s' <- mapM (convertRule (createH d4) (createK d3)) c1s
-            return $ CPS.CaseTerm d1 c1s'
+        createHClosure h $ \ d4 -> do
+          d3 <- gen
+          tyss <- getSumTypes ty1
+          c1s' <- forM (zip c1s tyss) $ \ (x, ty) ->
+                    convertRule x ty (createH d4) (createK d3)
+          ty2 <- getKType
+          createKClosure k ty2 $ \ d5 _ ->
+            return $ CPS.BindTerm d3 d5
+                   $ CPS.CaseTerm d1 c1s'
     Simple.CatchTerm d1 d2 t1 ->
       -- We have to begin here, which handles the catch. I think it should
       -- very nearly simply call the function with h, k, and the result, which
@@ -59,7 +63,7 @@ convertTerm t h k =
             -- The type given to K is the stream type.
             createKClosure k (CPS.SumType d2) $ \ d6 _ ->
               createHClosure h $ \ d7 -> do
-                ty1 <- getTermType t1
+                ty1 <- getKType
                 d8 <- createHandlerFunction d1 ty1 d2
                 return $ CPS.CallTerm d8 [d3, d6, d7]
           k' h d3 ty3 = do
@@ -68,6 +72,7 @@ convertTerm t h k =
             -- I'm not sure we want to do that.
             d5  <- getResultTypeIdent
             i   <- getNormalResultIndex ty3
+            setKType ty3
             t2' <- h d4
             return $ CPS.ConstructorTerm d4 d5 i [d3]
                    $ t2'
@@ -97,7 +102,7 @@ convertTerm t h k =
         d3   <- gen
         d4   <- gen
         t1'  <- convertTerm t1 (createH d4) (createK d3)
-        ty2' <- getTermType t1
+        ty2' <- getKType
         ty0' <- getHandlerType
         t2'  <- k h d2 (CPS.ArrowType [ty1', CPS.ArrowType [ty2', ty0'], ty0'])
         return $ CPS.LambdaTerm d2 [d1', d3, d4] [ty1', CPS.ArrowType [ty2', ty0'], ty0'] t1' t2'
@@ -128,7 +133,6 @@ convertTerm t h k =
       -- This should not take a type.
       return $ CPS.UnreachableTerm
     Simple.UntupleTerm d1s t1 t2 -> do
-      _ <- todo "untup"
       d2s <- mapM (const gen) d1s
       convertTerm t1 h $ \ h d1' ty1 -> do
         CPS.TupleType ty1s <- return ty1
@@ -165,32 +169,6 @@ convertType ty =
     Simple.SumType s1 ->
       return $ CPS.SumType s1
 
-getRuleType :: CPS.Type -> ([Simple.Ident], Simple.Term) -> M CPS.Type
-getRuleType ty (ds, t) = do
-  CPS.SumType d1 <- return ty
-  return $ todo "getRuleType"
-
-getTermType :: Simple.Term -> M CPS.Type
-getTermType t = return $ todo "getTermType"
-        {-
-   ApplyTerm
- | BindTerm Ident Term Term
- | CaseTerm Term [([Ident], Term)]
- | CatchTerm Ident Ident Term
- | ConcatenateTerm Term Term
- | ConstructorTerm Ident Index [Term]
- | FunTerm Ident
- | LambdaTerm Ident Type Term
- | StringTerm String
- | ThrowTerm Ident Term
- | TupleTerm [Term]
- | UnitTerm
- | UnreachableTerm Type
- | UntupleTerm [Ident] Term Term
- | VariableTerm Ident
-   deriving (Eq, Ord, Show)
-        -}
-
 getHandlerType :: M CPS.Type
 getHandlerType = do
   d <- getResultTypeIdent
@@ -200,14 +178,14 @@ createH :: CPS.Ident -> H
 createH d1 d2 = return $ CPS.ApplyTerm d1 [d2]
 
 createK :: CPS.Ident -> K
-createK d1 h d2 _ =
-  createHClosure h $ \ d3 ->
+createK d1 h d2 ty2 =
+  createHClosure h $ \ d3 -> do
+    setKType ty2
     return $ CPS.ApplyTerm d1 [d2, d3]
 
-convertRule :: H -> K -> ([Simple.Ident], Simple.Term) -> M ([CPS.Ident], CPS.Term)
-convertRule h k (d1s, t1) = do
+convertRule :: ([Simple.Ident], Simple.Term) -> [CPS.Type] -> H -> K -> M ([CPS.Ident], CPS.Term)
+convertRule (d1s, t1) ty1s h k = do
   d1s' <- mapM (const gen) d1s
-  ty1s <- mapM (const (return $ todo "convertRule")) d1s
   binds d1s d1s' ty1s $ do
     t1' <- convertTerm t1 h k
     return (d1s', t1')
@@ -252,6 +230,7 @@ run p m = runM m2 s r k
               , programFuns = []
               , sumIdentRenames = []
               , funIdentRenames = []
+              , kType = CPS.TupleType []
               }
         r = R { resultIdent = 0
               , tagTypePairs = []
@@ -302,7 +281,16 @@ data State = S { genInt :: Int
                , programFuns :: [(CPS.Ident, CPS.Fun)]
                , sumIdentRenames :: [(Simple.Ident, CPS.Ident)]
                , funIdentRenames :: [(Simple.Ident, CPS.Ident)]
+               , kType :: CPS.Type
                }
+
+getKType :: M CPS.Type
+getKType = do
+  get kType
+
+setKType :: CPS.Type -> M ()
+setKType ty = do
+  set $ \ s -> s {kType = ty}
 
 look :: (Reader -> a) -> M a
 look f = M $ \ s r k -> k (f r) s
@@ -494,6 +482,7 @@ createStartFun d1 = do
   i   <- getNormalResultIndex ty1
   ty2 <- getHandlerType
   ty3 <- getResultType
+  c1s <- createStartRules
   exportFun ( d2
             , CPS.Fun [] []
               -- This is called with the Output type. It should pass it on to the handler.
@@ -503,10 +492,49 @@ createStartFun d1 = do
                 )
                 -- This is called with the Result type.
             $   CPS.LambdaTerm d8 [d9] [ty3]
-                  CPS.UnreachableTerm
+                  -- CPS.UnreachableTerm
+                  (CPS.CaseTerm d9 c1s)
             $   CPS.CallTerm d1 [d3, d8]
             )
   return d2
+
+createOutputHandler :: M CPS.Ident
+createOutputHandler = do
+  d1 <- gen
+  d2 <- gen
+  ty2 <- convertType (Simple.SumType 0)
+  d3 <- gen
+  d4 <- gen
+  d5 <- gen
+  exportFun ( d1
+            , CPS.Fun [d2] [ty2]
+            $ CPS.CaseTerm d2
+                [ ([], CPS.ExitTerm)
+                , ([d3, d4], CPS.WriteTerm d3 (CPS.CallTerm d1 [d4]))
+                , ([d5], todo "createOutputHandler")
+                ]
+            )
+  return d1
+
+createStartRules :: M [([CPS.Ident], CPS.Term)]
+createStartRules = do
+  d0 <- createOutputHandler
+  xs <- getTagTypes
+  xs' <- forM xs $ \ (_, _, _, _) -> do
+           d1 <- gen
+           d2 <- gen
+           return ([d1, d2], CPS.UnreachableTerm)
+  ys <- getNormalTypes
+  ty1 <- convertType (Simple.SumType 0)
+  ys' <- forM ys $ \ ty2 ->
+           if ty1 == ty2
+             then do
+               d1 <- gen
+               return ([d1], CPS.CallTerm d0 [d1])
+             else do
+               d1 <- gen
+               return ([d1], CPS.UnreachableTerm)
+  return $ xs' ++ ys'
 
 renameSumIdent :: Simple.Ident -> M CPS.Ident
 renameSumIdent d = do
@@ -539,6 +567,13 @@ exportFun :: (CPS.Ident, CPS.Fun) -> M ()
 exportFun x = do
   xs <- get programFuns
   set $ \ s -> s {programFuns = x:xs}
+
+getSumTypes :: CPS.Type -> M [[CPS.Type]]
+getSumTypes ty = do
+  CPS.SumType d <- return ty
+  xs <- get programSums
+  CPS.Sum tyss <- return $ fromMaybe (unreachable $ "getSumTypes: " ++ show d) $ lookup d xs
+  return tyss
 
 -- Utility Functions
 

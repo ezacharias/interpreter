@@ -25,13 +25,16 @@ data Type =
 
 data Term =
    ApplyTerm Ident [Ident]
+ | BindTerm Ident Ident Term
  | CallTerm Ident [Ident]
  | CaseTerm Ident [([Ident], Term)]
  | ConcatenateTerm Ident Ident Ident Term
  | ConstructorTerm Ident Ident Index [Ident] Term
+ | ExitTerm
  | LambdaTerm Ident [Ident] [Type] Term Term
  | StringTerm Ident String Term
  | TupleTerm Ident [Ident] Term
  | UnreachableTerm
  | UntupleTerm [Ident] Ident Term
+ | WriteTerm Ident Term
    deriving (Eq, Ord, Show)

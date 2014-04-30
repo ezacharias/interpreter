@@ -2,4 +2,4 @@ The minimial program.
 
 
     Main : Output
-      Unreachable
+      Exit
