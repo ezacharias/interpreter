@@ -1,10 +1,38 @@
+-- Lambda lifting.
+
 module Compiler.Direct.Converter where
+
+import Control.Monad (forM)
 
 import qualified Compiler.CPS as CPS
 import qualified Compiler.Direct as Direct
 
 convert :: CPS.Program -> Direct.Program
-convert = undefined
+convert p = run p $ do
+  mapM_ convertSum (CPS.programSums p)
+  mapM_ convertFun (CPS.programFuns p)
+  finish
+  x1s <- undefined
+  x2s <- undefined
+  d <- renameFunIdent (CPS.programStart p)
+  return $ Direct.Program x1s x2s d
+
+convertSum :: (CPS.Ident, CPS.Sum) -> M ()
+convertSum = undefined
+
+convertFun :: (CPS.Ident, CPS.Fun) -> M ()
+convertFun = undefined
+
+-- We now have the completed variant types, so we can generate them and the
+-- apply functions.
+finish :: M ()
+finish = undefined
+
+renameFunIdent :: CPS.Ident -> M Direct.Ident
+renameFunIdent = undefined
+
+run :: CPS.Program -> M a -> a
+run = undefined
 
 type M a = [a]
 
@@ -29,23 +57,51 @@ convertTerm t =
       bind d1 d1' $ do
         t1' <- convertTerm t1
         return $ Direct.ConcatenateTerm d1' d2' d3' t1'
+    CPS.ExitTerm ->
+      return Direct.ExitTerm
     CPS.LambdaTerm d1 d2s ty2s t1 t2 -> do
       ty2s' <- mapM convertType ty2s
-      d2s' <- mapM gen ty2s'
       d3' <- getClosureIdent ty2s'
       d1' <- gen (Direct.SumType d3')
-      _ <- resetFree $ do
-             t1' <- binds d2s d2s' $ do
-                      convertTerm t1
-             d4s' <- free
-             undefined
-      i <- undefined
-      d4s' <- undefined
+      d4s' <- resetFree $ do
+                d2s' <- mapM gen ty2s'
+                t1' <- binds d2s d2s' $ do
+                         convertTerm t1
+                d4s' <- free
+                ty4s' <- mapM getType d4s'
+                d5' <- getFunIdent
+                exportFun (d5', Direct.Fun (d4s' ++ d2s') (ty4s' ++ ty2s') t1')
+      i <- addConstructor d3' d4s'
       t2' <- bind d1 d1' $ do
                convertTerm t2
       return $ Direct.ConstructorTerm d1' d3' i d4s' t2'
     _ ->
       undefined
+
+-- This takes:
+--   d0      the name of the function to generate
+--   sd      the ident of the sum type
+--   ty2s    the types of the arguments to the closure
+--   xs      the types of the free vars paired with the ident of the direct
+--           function to call
+createApplyFun :: Direct.Ident -> Direct.Ident -> [Direct.Type] -> [([Direct.Type], Direct.Ident)] -> M ()
+createApplyFun d0 sd ty2s xs = do
+  ty1 <- return $ Direct.SumType sd
+  d1 <- gen ty1
+  d2s <- mapM gen ty2s
+  cs <- forM xs $ \ (ty3s, d4) -> do
+          d3s <- mapM gen ty3s
+          return $ (d3s, Direct.CallTerm d4 (d3s ++ d2s))
+  exportFun (d0, Direct.Fun (d1:d2s) (ty1:ty2s) (Direct.CaseTerm d1 cs))
+
+addConstructor :: Direct.Ident -> [Direct.Ident] -> M Int
+addConstructor = undefined
+
+getFunIdent :: M Direct.Ident
+getFunIdent = undefined
+
+exportFun :: (Direct.Ident, Direct.Fun) -> M ()
+exportFun = undefined
 
 getClosureIdent :: [Direct.Type] -> M Direct.Ident
 getClosureIdent = undefined
@@ -73,7 +129,10 @@ getType = undefined
 getApplyFun :: Direct.Ident -> M Direct.Ident
 getApplyFun = undefined
 
-resetFree :: M a -> M a
+-- This is a tricky function. It must reset the free variable list.
+-- Importantly, it must ensure the renames in the body are different from the
+-- renames outside.
+resetFree :: M () -> M [Direct.Ident]
 resetFree = undefined
 
 free :: M [Direct.Ident]
