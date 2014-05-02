@@ -2,10 +2,13 @@
 
 module Compiler.Direct.Converter where
 
-import           Control.Monad       (forM)
+import           Control.Monad   (forM)
+import           Data.List       (delete, union)
+import           Data.Maybe      (fromMaybe)
+-- import           Debug.Trace     (trace)
 
-import qualified Compiler.CPS        as CPS
-import qualified Compiler.Direct     as Direct
+import qualified Compiler.CPS    as CPS
+import qualified Compiler.Direct as Direct
 
 convert :: CPS.Program -> Direct.Program
 convert p = run p $ do
@@ -33,8 +36,8 @@ convertFun (d0, CPS.Fun d1s ty1s t1) = do
            convertTerm t1
   exportFun (d0', Direct.Fun d1s' ty1s' t1')
 
--- We now have the completed variant types, so we can generate them and the
--- apply functions.
+-- We now have the completed variant types of closures, so we can generate
+-- them and the apply functions.
 finish :: M ()
 finish = todo "finish"
 
@@ -63,11 +66,16 @@ renameFunIdent d = do
 run :: CPS.Program -> M Direct.Program -> Direct.Program
 run p m = runM m k s
  where k x _ = x
-       s = S { genInt = 0
+       s = S { genInt = 10000
              , sumIdents = []
              , funIdents = []
              , arrowSumIdents = []
+             , applyFunIdents = []
+             , localIdents  = []
+             , localTypes = []
+             , usedIdents = []
              , exportedSums = []
+             , exportedFuns = []
              }
 
 convertTerm :: CPS.Term -> M Direct.Term
@@ -85,6 +93,16 @@ convertTerm t =
       ty2' <- getType d2'
       bind d1 d2' ty2' $ do
         convertTerm t1
+    CPS.CallTerm d1 d2s -> do
+      d1'  <- renameFunIdent d1
+      d2s' <- mapM renameIdent d2s
+      return $ Direct.CallTerm d1' d2s'
+    CPS.CaseTerm d1 c1s -> do
+      d1' <- renameIdent d1
+      Direct.SumType d2 <- getType d1'
+      tyss' <- getSumTypes d2
+      c1s' <- mapM convertRule (zip c1s tyss')
+      return $ Direct.CaseTerm d1' c1s'
     CPS.ConcatenateTerm d1 d2 d3 t1 -> do
       d1' <- gen
       d2' <- renameIdent d2
@@ -92,6 +110,13 @@ convertTerm t =
       t1' <- bind d1 d1' Direct.StringType $ do
                convertTerm t1
       return $ Direct.ConcatenateTerm d1' d2' d3' t1'
+    CPS.ConstructorTerm d1 d2 i d3s t1 -> do
+      d1'  <- gen
+      d2'  <- renameSumIdent d2
+      d3s' <- mapM renameIdent d3s
+      t1'  <- bind d1 d1' (Direct.SumType d2') $
+                convertTerm t1
+      return $ Direct.ConstructorTerm d1' d2' i d3s' t1'
     CPS.ExitTerm ->
       return Direct.ExitTerm
     CPS.LambdaTerm d1 d2s ty2s t1 t2 -> do
@@ -105,16 +130,40 @@ convertTerm t =
                               convertTerm t1
                      d4s' <- free
                      ty4s' <- mapM getType d4s'
-                     d5' <- getFunIdent ty4s' ty2s'
-                     -- return (d4s', ty4s', t1')
+                     d5' <- gen -- getFunIdent ty4s' ty2s'
                      exportFun (d5', Direct.Fun (d4s' ++ d2s') (ty4s' ++ ty2s') t1')
-                     i <- addConstructor d3' d4s'
+                     i <- return 0 -- addConstructor d3' d4s'
                      return (i, d4s')
       t2' <- bind d1 d1' ty1' $ do
                convertTerm t2
       return $ Direct.ConstructorTerm d1' d3' i d4s' t2'
+    CPS.StringTerm d1 s1 t1 -> do
+      d1' <- gen
+      t1' <- bind d1 d1' Direct.StringType $ do
+               convertTerm t1
+      return $ Direct.StringTerm d1' s1 t1'
+    CPS.TupleTerm d1 d2s t1 -> do
+      d1' <- gen
+      d2s' <- mapM renameIdent d2s
+      ty2s' <- mapM getType d2s'
+      t1' <- bind d1 d1' (Direct.TupleType ty2s') $ do
+               convertTerm t1
+      return $ Direct.TupleTerm d1' d2s' t1'
+    CPS.UnreachableTerm -> do
+      return $ Direct.UnreachableTerm
+    CPS.WriteTerm d1 t1 -> do
+      d1' <- renameIdent d1
+      t1' <- convertTerm t1
+      return $ Direct.WriteTerm d1' t1'
     _ ->
-      todo "convertTerm"
+      todo $ "convertTerm: " ++ show t
+
+convertRule :: (([CPS.Ident], CPS.Term), [Direct.Type]) -> M ([Direct.Ident], Direct.Term)
+convertRule ((d1s, t1), ty1s') = do
+  d1s' <- mapM (const gen) d1s
+  t1' <- binds d1s d1s' ty1s' $ do
+           convertTerm t1
+  return (d1s', t1')
 
 -- This takes:
 --   d0      the name of the function to generate
@@ -144,7 +193,8 @@ exportSum x = do
   modify $ \ s -> s {exportedSums = x : exportedSums s}
 
 exportFun :: (Direct.Ident, Direct.Fun) -> M ()
-exportFun = todo "exportFun"
+exportFun x = do
+  modify $ \ s -> s {exportedFuns = x : exportedFuns s}
 
 convertType :: CPS.Type -> M Direct.Type
 convertType ty =
@@ -164,7 +214,18 @@ convertType ty =
 
 -- Returning from a bind must remove the ident from the use list.
 bind :: CPS.Ident -> Direct.Ident -> Direct.Type -> M a -> M a
-bind = todo "bind"
+bind d d' ty' m = do
+  xs1 <- get localIdents
+  xs2 <- get localTypes
+  modify $ \ s -> s { localIdents = (d,d'):xs1
+                    , localTypes = (d',ty'):xs2
+                    }
+  y <- m
+  modify $ \ s -> s { localIdents = xs1
+                    , localTypes = xs2
+                    , usedIdents = delete d' (usedIdents s)
+                    }
+  return y
 
 binds :: [CPS.Ident] -> [Direct.Ident] -> [Direct.Type] -> M a -> M a
 binds [] [] [] m = m
@@ -173,7 +234,11 @@ binds _ _ _ _ = unreachable "binds"
 
 -- Renaming must mark the ident as used.
 renameIdent :: CPS.Ident -> M Direct.Ident
-renameIdent = todo "renameIdent"
+renameIdent d = do
+  xs <- get localIdents
+  d' <- return $ fromMaybe (unreachable "renameIdent") (lookup d xs)
+  modify $ \ s -> s {usedIdents = [d'] `union` usedIdents s}
+  return d'
 
 genLocal :: Direct.Type -> M Direct.Ident
 genLocal ty = do
@@ -187,11 +252,21 @@ gen = do
   return i
 
 getType :: Direct.Ident -> M Direct.Type
-getType = todo "getType"
+getType d = do
+  xs <- get localTypes
+  return $ fromMaybe (unreachable "getType") (lookup d xs)
 
 -- Uses the ident of the variant type for the closure.
 getApplyFun :: Direct.Ident -> M Direct.Ident
-getApplyFun = todo "getApplyFun"
+getApplyFun d1 = do
+  xs <- get applyFunIdents
+  case lookup d1 xs of
+    Just d2 ->
+      return d2
+    Nothing -> do
+      d2 <- gen
+      modify $ \ s -> s {applyFunIdents = (d1,d2):xs}
+      return d2
 
 -- Arrow types are converted into sums. This generates the sum idents.
 getArrowSumIdent :: [Direct.Type] -> M Direct.Ident
@@ -209,16 +284,22 @@ getArrowSumIdent tys = do
 -- Importantly, it must ensure the renames in the body are different from the
 -- renames outside.
 resetFree :: M a -> M a
-resetFree = todo "resetFree"
-  -- xs <- free
-  -- setfree []
-  -- z <- m
-  -- ys <- free
-  -- setfree xs ++ ys
-  -- return z
+resetFree m = do
+  xs <- get usedIdents
+  modify $ \ s -> s {usedIdents = []}
+  y <- m
+  modify $ \ s -> s {usedIdents = xs `union` usedIdents s}
+  return y
 
 free :: M [Direct.Ident]
-free = todo "free"
+free = do
+  get usedIdents
+
+getSumTypes :: Direct.Ident -> M [[Direct.Type]]
+getSumTypes d1 = do
+  xs <- get exportedSums
+  Direct.Sum tyss <- return $ fromMaybe (unreachable $ "getSumTypes: " ++ show d1) (lookup d1 xs)
+  return tyss
 
 newtype M a = M { runM :: (a -> State -> Direct.Program) -> State -> Direct.Program }
 
@@ -227,11 +308,16 @@ instance Monad M where
   m >>= f = M (\ k -> runM m (\ x -> runM (f x) k))
 
 data State = S
- { genInt :: Int
- , sumIdents :: [(CPS.Ident, Direct.Ident)]
- , funIdents :: [(CPS.Ident, Direct.Ident)]
+ { genInt         :: Int
+ , sumIdents      :: [(CPS.Ident, Direct.Ident)]
+ , funIdents      :: [(CPS.Ident, Direct.Ident)]
  , arrowSumIdents :: [([Direct.Type], Direct.Ident)]
- , exportedSums :: [(Direct.Ident, Direct.Sum)]
+ , applyFunIdents :: [(Direct.Ident, Direct.Ident)]
+ , localIdents    :: [(CPS.Ident, Direct.Ident)]
+ , localTypes     :: [(Direct.Ident, Direct.Type)]
+ , usedIdents     :: [Direct.Ident]
+ , exportedSums   :: [(Direct.Ident, Direct.Sum)]
+ , exportedFuns   :: [(Direct.Ident, Direct.Fun)]
  }
 
 get :: (State -> a) -> M a

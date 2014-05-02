@@ -12,6 +12,7 @@ convert p = run p $ do
   mapM_ convertSum (Simple.programSums p)
   mapM_ convertFun (Simple.programFuns p)
   d  <- createStartFun (Simple.programMain p)
+  createResultSum
   x1 <- get programSums
   x2 <- get programFuns
   return $ CPS.Program x1 x2 d
@@ -20,6 +21,15 @@ convertSum :: (Simple.Ident, Simple.Sum) -> M ()
 convertSum (d0, Simple.Sum tyss) = do
   tyss' <- mapM (mapM convertType) tyss
   d0' <- renameSumIdent d0
+  exportSum (d0', CPS.Sum tyss')
+
+createResultSum :: M ()
+createResultSum = do
+  d0' <- getResultTypeIdent
+  ty3 <- getHandlerType
+  xs <- look tagTypePairs
+  ys <- look normalResultIndexes
+  tyss' <- return $ map (\ (_, (_, (ty1, ty2))) -> [ty1, CPS.ArrowType [ty2, ty3]]) xs ++ map (\ (ty, _) -> [ty]) ys
   exportSum (d0', CPS.Sum tyss')
 
 convertFun :: (Simple.Ident, Simple.Fun) -> M ()
