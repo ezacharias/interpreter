@@ -19,7 +19,6 @@ data Type =
    ArrowType [Type]
  | StringType
  | TupleType [Type]
- | UnitType
  | SumType Ident
    deriving (Eq, Ord, Show)
 

@@ -3,21 +3,23 @@
 module Compiler.Driver where
 
 import           Control.Monad
-import           System.Exit              (exitFailure)
+import           System.Exit               (exitFailure)
 import           System.IO
 
-import qualified Compiler.CPS             as CPS
-import qualified Compiler.CPS.Convert     as CPS.Convert
-import qualified Compiler.CPS.Interpreter as Interpreter
-import qualified Compiler.Elaborator      as Elaborator
-import qualified Compiler.Meta            as Meta
+import qualified Compiler.CPS              as CPS
+import qualified Compiler.CPS.Convert      as CPS.Convert
+import qualified Compiler.CPS.Interpreter  as Interpreter
+import qualified Compiler.Direct           as Direct
+import qualified Compiler.Direct.Converter as Direct.Converter
+import qualified Compiler.Elaborator       as Elaborator
+import qualified Compiler.Meta             as Meta
 import           Compiler.Parser
-import qualified Compiler.Simple          as Simple
-import qualified Compiler.Syntax          as Syntax
-import qualified Compiler.SyntaxChecker   as SyntaxChecker
+import qualified Compiler.Simple           as Simple
+import qualified Compiler.Syntax           as Syntax
+import qualified Compiler.SyntaxChecker    as SyntaxChecker
 import           Compiler.Token
 import           Compiler.Tokenizer
-import qualified Compiler.TypeChecker     as TypeChecker
+import qualified Compiler.TypeChecker      as TypeChecker
 
 data Driver a = DriverReturn a
               | DriverPerformIO (IO (Driver a))
@@ -39,7 +41,7 @@ liftIO io = DriverPerformIO (liftM return io)
 
 -- | Takes a filename and interprets the file.
 interpreter :: String -> Driver ()
-interpreter = parse >=> foo >=> syntaxCheck >=> foo >=> typeCheck >=> foo >=> elaborate >=> foo >=> cpsConvert >=> foo >=> interpret
+interpreter = parse >=> foo >=> syntaxCheck >=> foo >=> typeCheck >=> foo >=> elaborate >=> foo >=> cpsConvert >=> foo >=> directConvert >=> floop
 
 foo :: Show a => a -> Driver a
 foo x = liftIO (writeFile "/dev/null" (show x)) >> return x
@@ -106,3 +108,6 @@ interpret p = check $ Interpreter.interpret p
         check (Interpreter.EscapeStatus _ _) = DriverError "interpreter resulted in an uncaught throw"
         check Interpreter.UndefinedStatus    = DriverError "interpreter resulted in unreachable"
         check (Interpreter.WriteStatus s x)  = liftIO (putStrLn s) >> check x
+
+directConvert :: CPS.Program -> Driver Direct.Program
+directConvert x = return $ Direct.Converter.convert x
