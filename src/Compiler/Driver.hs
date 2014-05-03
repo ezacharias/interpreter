@@ -11,10 +11,12 @@ import qualified Compiler.CPS.Convert      as CPS.Convert
 import qualified Compiler.CPS.Interpreter  as Interpreter
 import qualified Compiler.Direct           as Direct
 import qualified Compiler.Direct.Converter as Direct.Converter
+import qualified Compiler.Direct.Interpreter as Direct.Interpreter
 import qualified Compiler.Elaborator       as Elaborator
 import qualified Compiler.Meta             as Meta
 import           Compiler.Parser
 import qualified Compiler.Simple           as Simple
+import qualified Compiler.Simple.Check     as Simple.Check
 import qualified Compiler.Syntax           as Syntax
 import qualified Compiler.SyntaxChecker    as SyntaxChecker
 import           Compiler.Token
@@ -41,7 +43,13 @@ liftIO io = DriverPerformIO (liftM return io)
 
 -- | Takes a filename and interprets the file.
 interpreter :: String -> Driver ()
-interpreter = parse >=> foo >=> syntaxCheck >=> foo >=> typeCheck >=> foo >=> elaborate >=> foo >=> cpsConvert >=> foo >=> directConvert >=> floop
+interpreter = parse >=> foo
+          >=> syntaxCheck >=> foo
+          >=> typeCheck >=> foo
+          >=> elaborate >=> foo >=> simpleCheck
+          >=> cpsConvert >=> foo
+          >=> directConvert >=> foo
+          >=> directInterpret
 
 foo :: Show a => a -> Driver a
 foo x = liftIO (writeFile "/dev/null" (show x)) >> return x
@@ -111,3 +119,15 @@ interpret p = check $ Interpreter.interpret p
 
 directConvert :: CPS.Program -> Driver Direct.Program
 directConvert x = return $ Direct.Converter.convert x
+
+directInterpret :: Direct.Program -> Driver ()
+directInterpret p = check $ Direct.Interpreter.interpret p
+  where check Direct.Interpreter.ExitStatus         = return ()
+        check (Direct.Interpreter.EscapeStatus _ _) = DriverError "interpreter resulted in an uncaught throw"
+        check Direct.Interpreter.UndefinedStatus    = DriverError "interpreter resulted in unreachable"
+        check (Direct.Interpreter.WriteStatus s x)  = liftIO (putStrLn s) >> check x
+
+simpleCheck :: Simple.Program -> Driver Simple.Program
+simpleCheck x = check $ Simple.Check.check x
+  where check Nothing  = return x
+        check (Just s) = DriverError $ "simple check failed: " ++ s

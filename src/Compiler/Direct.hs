@@ -23,8 +23,7 @@ data Type =
    deriving (Eq, Ord, Show)
 
 data Term =
-   BindTerm Ident Ident Term
- | CallTerm Ident [Ident]
+   CallTerm Ident [Ident]
  | CaseTerm Ident [([Ident], Term)]
  | ConcatenateTerm Ident Ident Ident Term
  | ConstructorTerm Ident Ident Index [Ident] Term

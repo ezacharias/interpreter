@@ -2,10 +2,10 @@
 
 module Compiler.Direct.Converter where
 
-import           Control.Monad   (forM)
+import           Control.Monad   (forM, forM_)
 import           Data.List       (delete, union)
 import           Data.Maybe      (fromMaybe)
--- import           Debug.Trace     (trace)
+import           Debug.Trace     (trace)
 
 import qualified Compiler.CPS    as CPS
 import qualified Compiler.Direct as Direct
@@ -16,7 +16,7 @@ convert p = run p $ do
   mapM_ convertFun (CPS.programFuns p)
   finish
   x1s <- get exportedSums
-  x2s <- todo "convert"
+  x2s <- get exportedFuns
   d <- renameFunIdent (CPS.programStart p)
   return $ Direct.Program x1s x2s d
 
@@ -39,7 +39,27 @@ convertFun (d0, CPS.Fun d1s ty1s t1) = do
 -- We now have the completed variant types of closures, so we can generate
 -- them and the apply functions.
 finish :: M ()
-finish = todo "finish"
+finish = do
+  xs <- get arrowSumIdents
+  ys <- get applyFunIdents
+  zs <- get closureSums
+  _ <- trace (show (length xs)) (return ())
+  _ <- trace (show (length ys)) (return ())
+  _ <- trace (show (length zs)) (return ())
+  forM_ xs $ \ (ty3s, d1) -> do
+    ps <- return $ fromMaybe [] (lookup d1 zs)
+    exportSum (d1, Direct.Sum (map fst ps))
+    case lookup d1 ys of
+      Nothing -> do
+        return ()
+      Just d0 -> do
+        d2 <- gen
+        ty2 <- return $ Direct.SumType d1
+        d3s <- mapM (const gen) ty3s
+        cs <- forM ps $ \ (ty4s, d5) -> do
+                d4s <- mapM (const gen) ty4s
+                return (d4s, Direct.CallTerm d5 (d4s ++ d3s))
+        exportFun (d0, Direct.Fun (d2:d3s) (ty2:ty3s) (Direct.CaseTerm d2 cs))
 
 renameSumIdent :: CPS.Ident -> M Direct.Ident
 renameSumIdent d = do
@@ -76,6 +96,7 @@ run p m = runM m k s
              , usedIdents = []
              , exportedSums = []
              , exportedFuns = []
+             , closureSums = []
              }
 
 convertTerm :: CPS.Term -> M Direct.Term
@@ -130,9 +151,9 @@ convertTerm t =
                               convertTerm t1
                      d4s' <- free
                      ty4s' <- mapM getType d4s'
-                     d5' <- gen -- getFunIdent ty4s' ty2s'
+                     d5' <- gen
                      exportFun (d5', Direct.Fun (d4s' ++ d2s') (ty4s' ++ ty2s') t1')
-                     i <- return 0 -- addConstructor d3' d4s'
+                     i <- addClosureSum d3' (ty4s', d5')
                      return (i, d4s')
       t2' <- bind d1 d1' ty1' $ do
                convertTerm t2
@@ -157,6 +178,20 @@ convertTerm t =
       return $ Direct.WriteTerm d1' t1'
     _ ->
       todo $ "convertTerm: " ++ show t
+
+addClosureSum :: Direct.Ident -> ([Direct.Type] , Direct.Ident) -> M Int
+addClosureSum d1 x = do
+  ys <- get closureSums
+  (xs, ys) <- return $ grab d1 [] ys
+  i <- return $ length xs
+  modify $ \ s -> s {closureSums = (d1, xs ++ [x]):ys}
+  return i
+
+grab :: Eq a => a -> b -> [(a, b)] -> (b, [(a, b)])
+grab _  y1 []                      = (y1, [])
+grab x1 _  ((x2,y2):ps) | x1 == x2 = (y2, ps)
+grab x1 y1 (p:ps)                  = let (y', ps') = grab x1 y1 ps
+                                      in (y', p:ps')
 
 convertRule :: (([CPS.Ident], CPS.Term), [Direct.Type]) -> M ([Direct.Ident], Direct.Term)
 convertRule ((d1s, t1), ty1s') = do
@@ -318,6 +353,7 @@ data State = S
  , usedIdents     :: [Direct.Ident]
  , exportedSums   :: [(Direct.Ident, Direct.Sum)]
  , exportedFuns   :: [(Direct.Ident, Direct.Fun)]
+ , closureSums    :: [(Direct.Ident, [([Direct.Type], Direct.Ident)])]
  }
 
 get :: (State -> a) -> M a
