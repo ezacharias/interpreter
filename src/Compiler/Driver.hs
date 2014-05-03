@@ -11,6 +11,7 @@ import qualified Compiler.CPS.Check as CPS.Check
 import qualified Compiler.CPS.Convert      as CPS.Convert
 import qualified Compiler.CPS.Interpreter  as Interpreter
 import qualified Compiler.Direct           as Direct
+import qualified Compiler.Direct.Check     as Direct.Check
 import qualified Compiler.Direct.Converter as Direct.Converter
 import qualified Compiler.Direct.Interpreter as Direct.Interpreter
 import qualified Compiler.Elaborator       as Elaborator
@@ -49,7 +50,7 @@ interpreter = parse         >=> foo
           >=> typeCheck     >=> foo
           >=> elaborate     >=> foo >=> simpleCheck
           >=> cpsConvert    >=> foo >=> cpsCheck
-          >=> directConvert >=> foo
+          >=> directConvert >=> foo >=> directCheck
           >=> directInterpret
 
 foo :: Show a => a -> Driver a
@@ -137,3 +138,8 @@ cpsCheck :: CPS.Program -> Driver CPS.Program
 cpsCheck x = check $ CPS.Check.check x
   where check Nothing  = return x
         check (Just s) = DriverError $ "cps check failed: " ++ s
+
+directCheck :: Direct.Program -> Driver Direct.Program
+directCheck x = check $ Direct.Check.check x
+  where check Nothing  = return x
+        check (Just s) = DriverError $ "direct check failed: " ++ s
