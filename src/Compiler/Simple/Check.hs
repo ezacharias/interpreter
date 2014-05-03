@@ -52,7 +52,7 @@ checkTerm t =
       (ty3, ty4) <- getTag d1
       tyss <- getSum d2
       case tyss of
-        [[ty5, ArrowType ty6 (SumType d3)], [ty7]] -> do
+        [[ty7], [ty5, ArrowType ty6 (SumType d3)]] -> do
           assert (ty3 == ty5)
           assert (ty4 == ty7)
           assert (d2 == d3)

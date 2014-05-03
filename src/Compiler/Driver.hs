@@ -7,6 +7,7 @@ import           System.Exit               (exitFailure)
 import           System.IO
 
 import qualified Compiler.CPS              as CPS
+import qualified Compiler.CPS.Check as CPS.Check
 import qualified Compiler.CPS.Convert      as CPS.Convert
 import qualified Compiler.CPS.Interpreter  as Interpreter
 import qualified Compiler.Direct           as Direct
@@ -47,7 +48,7 @@ interpreter = parse >=> foo
           >=> syntaxCheck >=> foo
           >=> typeCheck >=> foo
           >=> elaborate >=> foo >=> simpleCheck
-          >=> cpsConvert >=> foo
+          >=> cpsConvert >=> foo >=> cpsCheck
           >=> directConvert >=> foo
           >=> directInterpret
 
@@ -131,3 +132,8 @@ simpleCheck :: Simple.Program -> Driver Simple.Program
 simpleCheck x = check $ Simple.Check.check x
   where check Nothing  = return x
         check (Just s) = DriverError $ "simple check failed: " ++ s
+
+cpsCheck :: CPS.Program -> Driver CPS.Program
+cpsCheck x = check $ CPS.Check.check x
+  where check Nothing  = return x
+        check (Just s) = DriverError $ "cps check failed: " ++ s
