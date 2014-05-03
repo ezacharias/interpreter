@@ -5,7 +5,7 @@ module Compiler.Direct.Converter where
 import           Control.Monad   (forM, forM_)
 import           Data.List       (delete, union)
 import           Data.Maybe      (fromMaybe)
-import           Debug.Trace     (trace)
+-- import           Debug.Trace     (trace)
 
 import qualified Compiler.CPS    as CPS
 import qualified Compiler.Direct as Direct
@@ -43,9 +43,6 @@ finish = do
   xs <- get arrowSumIdents
   ys <- get applyFunIdents
   zs <- get closureSums
-  _ <- trace (show (length xs)) (return ())
-  _ <- trace (show (length ys)) (return ())
-  _ <- trace (show (length zs)) (return ())
   forM_ xs $ \ (ty3s, d1) -> do
     ps <- return $ fromMaybe [] (lookup d1 zs)
     exportSum (d1, Direct.Sum (map fst ps))

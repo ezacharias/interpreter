@@ -2,13 +2,14 @@ module Compiler.CPS.Convert where
 
 import Control.Monad (forM)
 import Data.Maybe (fromMaybe)
+-- import Debug.Trace (trace)
 
 import qualified Compiler.CPS as CPS
 import qualified Compiler.Simple as Simple
 
 convert :: Simple.Program -> CPS.Program
 convert p = run p $ do
---  _ <- error $ show (Simple.programTags p)
+  -- _ <- error $ show (Simple.programTags p)
   mapM_ convertSum (Simple.programSums p)
   mapM_ convertFun (Simple.programFuns p)
   d  <- createStartFun (Simple.programMain p)
@@ -238,14 +239,14 @@ arrowTypeResult _ = error "arrowTypeResult"
 
 run :: Simple.Program -> M CPS.Program -> CPS.Program
 run p m = runM m2 s r k
-  where s = S { genInt = 1000
+  where s = S { genInt = 1001
               , programSums = []
               , programFuns = []
               , sumIdentRenames = []
               , funIdentRenames = []
               , kType = CPS.TupleType []
               }
-        r = R { resultIdent = 0
+        r = R { resultIdent = 1000
               , tagTypePairs = []
               , normalResultIndexes = []
               , funTypes = []
@@ -253,7 +254,6 @@ run p m = runM m2 s r k
               }
         k x _ = x
         m2 = do
-          d1 <- gen
           xs1 <- forM (zip [0..] (Simple.programTags p)) $ \ (i, (d, Simple.Tag ty1 ty2)) -> do
                    ty1 <- convertType ty1
                    ty2 <- convertType ty2
@@ -265,8 +265,7 @@ run p m = runM m2 s r k
           xs3 <- forM (Simple.programFuns p) $ \ (d, Simple.Fun ty _) -> do
                    ty <- convertType ty
                    return (d, ty)
-          with (\ r -> r { resultIdent = d1
-                         , tagTypePairs = xs1
+          with (\ r -> r { tagTypePairs = xs1
                          , normalResultIndexes = xs2
                          , funTypes = xs3
                          })
@@ -482,22 +481,24 @@ getNormalTypes = do
   xs <- look normalResultIndexes
   return $ map fst xs
 
+-- d1 is the ident of main
 createStartFun :: Simple.Ident -> M CPS.Ident
 createStartFun d1 = do
+  ty0 <- getFunType d1
   d1 <- renameFunIdent d1
   d2 <- gen
   d3 <- gen
   d4 <- gen
   d5 <- gen
   d6 <- gen
-  d7 <- gen
+  d7 <- getResultTypeIdent
   d8 <- gen
   d9 <- gen
   ty1 <- convertType (Simple.SumType 0)
   i   <- getNormalResultIndex ty1
   ty2 <- getHandlerType
   ty3 <- getResultType
-  d10 <- createStartHandler
+  d10 <- createStartHandler ty0
   exportFun ( d2
             , CPS.Fun [] []
               -- This is called with the Output type. It should pass it on to the handler.
@@ -513,23 +514,26 @@ createStartFun d1 = do
             )
   return d2
 
-createStartHandler :: M CPS.Ident
-createStartHandler = do
+-- This is called with a result object.
+--   ty is the Output type
+createStartHandler :: CPS.Type ->  M CPS.Ident
+createStartHandler ty = do
   d1 <- gen
   d2 <- gen
   ty2 <- getResultType
-  c1s <- createStartRules d1
+  c1s <- createStartRules d1 ty
   exportFun ( d1
             , CPS.Fun [d2] [ty2]
             $   CPS.CaseTerm d2 c1s
             )
   return d1
 
-createOutputHandler :: CPS.Ident -> M CPS.Ident
-createOutputHandler d0 = do
+-- d0 is the ident of the result handler function
+-- ty2 is the output sum type
+createOutputHandler :: CPS.Ident -> CPS.Type -> M CPS.Ident
+createOutputHandler d0 ty2 = do
   d1 <- gen
   d2 <- gen
-  ty2 <- convertType (Simple.SumType 0)
   d3 <- gen
   d4 <- gen
   d5 <- gen
@@ -550,7 +554,7 @@ createApply d0 d1 = do
   d3 <- gen
   d4 <- gen
   d5 <- gen
-  d6 <- gen
+  d6 <- getResultTypeIdent
   d7 <- gen
   d8 <- gen
   d9 <- gen
@@ -570,9 +574,11 @@ createApply d0 d1 = do
          $   CPS.ApplyTerm d1 [d9, d2, d7]
 
 
-createStartRules :: CPS.Ident -> M [([CPS.Ident], CPS.Term)]
-createStartRules d1 = do
-  d0 <- createOutputHandler d1
+-- d1 is the ident of the result handler function
+-- ty is the output type
+createStartRules :: CPS.Ident -> CPS.Type -> M [([CPS.Ident], CPS.Term)]
+createStartRules d1 ty = do
+  d0 <- createOutputHandler d1 ty
   xs <- getTagTypes
   xs' <- forM xs $ \ (_, (_, (_, _))) -> do
            d1 <- gen

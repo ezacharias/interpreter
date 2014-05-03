@@ -44,11 +44,11 @@ liftIO io = DriverPerformIO (liftM return io)
 
 -- | Takes a filename and interprets the file.
 interpreter :: String -> Driver ()
-interpreter = parse >=> foo
-          >=> syntaxCheck >=> foo
-          >=> typeCheck >=> foo
-          >=> elaborate >=> foo >=> simpleCheck
-          >=> cpsConvert >=> foo >=> cpsCheck
+interpreter = parse         >=> foo
+          >=> syntaxCheck   >=> foo
+          >=> typeCheck     >=> foo
+          >=> elaborate     >=> foo >=> simpleCheck
+          >=> cpsConvert    >=> foo >=> cpsCheck
           >=> directConvert >=> foo
           >=> directInterpret
 
