@@ -6,6 +6,7 @@ import           Control.Monad
 import           System.Exit               (exitFailure)
 import           System.IO
 
+import qualified Compiler.C.Converter as C.Converter
 import qualified Compiler.CPS              as CPS
 import qualified Compiler.CPS.Check as CPS.Check
 import qualified Compiler.CPS.Convert      as CPS.Convert
@@ -51,7 +52,7 @@ interpreter = parse         >=> foo
           >=> elaborate     >=> foo >=> simpleCheck
           >=> cpsConvert    >=> foo >=> cpsCheck
           >=> directConvert >=> foo >=> directCheck
-          >=> directInterpret
+          >=> cConvert
 
 foo :: Show a => a -> Driver a
 foo x = liftIO (writeFile "/dev/null" (show x)) >> return x
@@ -143,3 +144,6 @@ directCheck :: Direct.Program -> Driver Direct.Program
 directCheck x = check $ Direct.Check.check x
   where check Nothing  = return x
         check (Just s) = DriverError $ "direct check failed: " ++ s
+
+cConvert :: Direct.Program -> Driver ()
+cConvert x = liftIO $ C.Converter.convert stdout x

@@ -3,6 +3,7 @@ module-template: ! 'module MODULE_NAME where
 '
 extensions:
   GADTs: true
+  ScopedTypeVariables: true
   RankNTypes: true
 environment: ghc-7.4.2-stable-13.09
 cabal-file: project.cabal
