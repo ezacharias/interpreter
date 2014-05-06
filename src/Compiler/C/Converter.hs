@@ -27,9 +27,11 @@ run h p m = runM m s (\ () _ -> return ()) 0
 
 putIncludes :: M ()
 putIncludes = do
+  put $ "#include <err.h>"
   put $ "#include <stdint.h>"
   put $ "#include <stdio.h>"
   put $ "#include <stdlib.h>"
+  put $ "#include <unistd.h>"
 
 putStateStruct :: M ()
 putStateStruct = do
@@ -55,11 +57,11 @@ putPrototypes i = do
 putMain :: Ident -> M ()
 putMain d = do
   s <- getFunName d
-  put "extern void main() {"
+  put "extern int main() {"
   indent $ do
     put $ "struct state *s = (struct state *)malloc(sizeof(struct state));"
     put $ "s->frontier = (uintptr_t)malloc(512 * 1024);"
-    put $ "s->limit = frontier + 512 * 1024;"
+    put $ "s->limit = s->frontier + 512 * 1024;"
     put $ "s->f = " ++ s ++ ";"
     put $ "for (;;) {"
     indent $ do
@@ -155,7 +157,7 @@ putTerm t =
       s2s <- mapM getIdent d2s
       put $ "uintptr_t " ++ s1 ++ " = frontier;"
       put $ "frontier += sizeof(uintptr_t) + " ++ show (length d2s) ++ " * sizeof(uintptr_t);"
-      put $ "*(uintptr_t)" ++ s1 ++ " = " ++ show i ++ ";"
+      put $ "*(uintptr_t *)" ++ s1 ++ " = " ++ show i ++ ";"
       forM_ (zip s2s [1..]) $ \ (s2, i :: Int) -> do
         put $ "*(uintptr_t *)(" ++ s1 ++ " + " ++ show i ++ " * sizeof(uintptr_t)) = " ++ s2 ++ ";"
       bind d1 s1 $ do
@@ -167,44 +169,45 @@ putTerm t =
     StringTerm d1 x2 t1 -> do
       s1 <- gen
       i <- return $ length x2
-      put $ "frontier += sizeof(uintptr_t) + sizeof(uintptr_t) + (" ++ show (length x2) ++ " + sizeof(uintptr_t) - 1) % sizeof(uintptr_t) * sizeof(uintptr_t);"
       put $ "uintptr_t " ++ s1 ++ " = frontier;"
+      put $ "frontier += sizeof(uintptr_t) + sizeof(uintptr_t) + (" ++ show (length x2) ++ " + sizeof(uintptr_t) - 1) % sizeof(uintptr_t) * sizeof(uintptr_t);"
       put $ "*(uintptr_t *)" ++ s1 ++ " = 0;"
       put $ "*(uintptr_t *)(" ++ s1 ++ " + sizeof(uintptr_t)) = " ++ show i ++ ";"
       s2 <- gen
-      put $ "char *" ++ s2 ++ " = " ++ show x2 ++ ";"
-      put $ "for (i = 0; i++; i < " ++ show i ++ ") {"
+      put $ "uintptr_t " ++ s2 ++ " = (uintptr_t)" ++ show x2 ++ ";"
+      put $ "for (uintptr_t i = 0; i < " ++ show i ++ "; i++) {"
       indent $ do
-        put $ "*(char *)(" ++ s1 ++ " + 2 * sizeof(uintptr_t) + i * sizeof(char)) = *(char *)(" ++ s2 ++ " + i * sizeof(char));"
+        put $ "*(char *)(" ++ s1 ++ " + 2 * sizeof(uintptr_t) + i) = *(char *)(" ++ s2 ++ " + i);"
       put $ "}"
       bind d1 s1 $ do
         putTerm t1
     TupleTerm d1 d2s t1 -> do
       s1 <- gen
-      put $ "uintptr " ++ s1 ++ " = frontier;"
+      put $ "uintptr_t " ++ s1 ++ " = frontier;"
       put $ "frontier += sizeof(uintptr_t) + " ++ show (length d2s) ++ " * sizeof(uintptr_t);"
-      put $ "*(uintptr_t *)" ++ s1 ++ " = 0";
-      forM_ d2s $ \ d2 -> do
+      put $ "*(uintptr_t *)" ++ s1 ++ " = 0;"
+      forM_ (zip [0..] d2s) $ \ (i :: Int, d2) -> do
         s2 <- getIdent d2
-        put $ "*(uintptr_t *)frontier = " ++ s2 ++ ";"
+        put $ "*(uintptr_t *)(" ++ s1 ++ " + sizeof(uintptr_t) + " ++ show i ++ " * sizeof(uintptr_t)) = " ++ s2 ++ ";"
       bind d1 s1 $ do
         putTerm t1
     UnreachableTerm -> do
       put "s->frontier = frontier;"
-      put "s->unreachable"
+      put "s->f = unreachable;"
       put "return;"
     UntupleTerm d1s d2 t1 -> do
       s1s <- mapM (const gen) d1s
       s2 <- getIdent d2
       forM_ (zip3 d1s s1s [1..]) $ \ (d1, s1, i :: Int) -> do
-        put $ s1 ++ " = *(uintptr_t *)(" ++ s2 ++ " + " ++ show i ++ " * sizeof(uintptr_t));"
+        put $ "uintptr_t " ++ s1 ++ " = *(uintptr_t *)(" ++ s2 ++ " + " ++ show i ++ " * sizeof(uintptr_t));"
       binds d1s s1s $ do
         putTerm t1
     WriteTerm d1 t1 -> do
       s1 <- getIdent d1
       s2 <- gen
       put $ "uintptr_t " ++ s2 ++ " = *(uintptr_t *)(" ++ s1 ++ " + sizeof(uintptr_t));"
-      put $ "write(stdout, (uint8_t *)(" ++ s1 ++ " + 2 * sizeof(uintptr_t)), (size_t)" ++ s2 ++ ");"
+      put $ "write(1, (uint8_t *)(" ++ s1 ++ " + 2 * sizeof(uintptr_t)), (size_t)" ++ s2 ++ ");"
+      put $ "write(1, \"\\n\", 1);"
       putTerm t1
 
 putRule :: String -> Int -> ([Ident], Term) -> M ()
