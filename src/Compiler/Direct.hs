@@ -18,7 +18,6 @@ data Fun = Fun [Ident] [Type] Term
 data Type =
    StringType
  | TupleType [Type]
- | UnitType
  | SumType Ident
    deriving (Eq, Ord, Show)
 

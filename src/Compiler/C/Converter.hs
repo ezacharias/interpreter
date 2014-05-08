@@ -1,3 +1,5 @@
+-- We assume 64 bit pointers.
+
 module Compiler.C.Converter where
 
 import           Control.Monad   (forM_)
@@ -37,11 +39,12 @@ putStateStruct :: M ()
 putStateStruct = do
   put $ "struct state {"
   indent $ do
-    put $ "uintptr_t frontier;"
-    put $ "uintptr_t limit;"
+    put $ "uint64_t frontier;"
+    put $ "uint64_t limit;"
     put $ "void (*f)(struct state *);"
-    put $ "uintptr_t arguments[16];"
+    put $ "uint64_t arguments[31];"
     put $ "void (*saved)(struct state *);"
+    put $ "uint32_t argument_bitfield;"
   put $ "};"
 
 putPrototypes :: Int -> M ()
@@ -60,8 +63,8 @@ putMain d = do
   put "extern int main() {"
   indent $ do
     put $ "struct state *s = (struct state *)malloc(sizeof(struct state));"
-    put $ "s->frontier = (uintptr_t)malloc(512 * 1024);"
-    put $ "s->limit = s->frontier + 512 * 1024;"
+    put $ "s->frontier = (uint64_t)malloc(1024 * 1024);"
+    put $ "s->limit = s->frontier + 1024 * 1024;"
     put $ "s->f = " ++ s ++ ";"
     put $ "for (;;) {"
     indent $ do
@@ -82,7 +85,7 @@ putUnreachable :: M ()
 putUnreachable = do
   put $ "static void unreachable(struct state *s) {"
   indent $ do
-    put $ "err(EXIT_FAILURE, \"unreachable\");"
+    put $ "errx(EXIT_FAILURE, \"unreachable\");"
     put $ "return;"
   put $ "}"
 
@@ -90,7 +93,7 @@ putGC :: M ()
 putGC = do
   put $ "static void gc(struct state *s) {"
   indent $ do
-    put $ "err(EXIT_FAILURE, \"out of memory\");"
+    put $ "errx(EXIT_FAILURE, \"out of memory\");"
     put $ "return;"
   put $ "}"
 
@@ -102,15 +105,16 @@ putFun (d, Fun ds tys t) = do
   ss <- mapM (const gen) ds
   put $ "static void " ++ s ++ "(struct state *s) {"
   indent $ do
-    put $ "uintptr_t frontier = s->frontier;"
+    put $ "uint64_t frontier = s->frontier;"
     put $ "if (frontier + " ++ show n ++ " > s->limit) {"
     indent $ do
       put $ "s->f = gc;"
       put $ "s->saved = " ++ s ++ ";"
+      put $ "s->argument_bitfield = " ++ bitfield tys ++ ";"
       put "return;"
     put $ "}"
     forM_ (zip ss [0..]) $ \ (s, i :: Int) -> do
-      put $ "uintptr_t " ++ s ++ " = *(uintptr_t *)(s->arguments + " ++ show i ++ " * sizeof(uintptr_t));"
+      put $ "uint64_t " ++ s ++ " = *(uint64_t *)(s->arguments + " ++ show (i * 8) ++ ");"
     binds ds ss $ do
       putTerm t
   put $ "}"
@@ -120,14 +124,30 @@ allocationAmount t =
   case t of
     CallTerm _ _ -> 0
     CaseTerm _ rs -> foldl1 max (map allocationAmount (map snd rs))
-    ConcatenateTerm _ _ _ t -> 8 + 8 + (32)
-    ConstructorTerm _ _ _ ds t -> 8 + 8 * length ds + allocationAmount t
+    -- Maximum string length is 32.
+    ConcatenateTerm _ _ _ t -> 8 + 8 + 8 + 40
+    ConstructorTerm _ _ _ ds t -> align (8 + 8 + length ds * 8) + allocationAmount t
     ExitTerm -> 0
-    StringTerm _ _ t ->  8 + 32 + allocationAmount t
-    TupleTerm _ ds t -> 8 + 8 * length ds + allocationAmount t
+    -- Maximum string length is 32.
+    StringTerm _ x t -> align (8 + 8 + 8 + length x) + allocationAmount t
+    TupleTerm _ ds t -> align (8 + 8 + length ds * 8) + allocationAmount t
     UnreachableTerm -> 0
     UntupleTerm _ _ t -> allocationAmount t
     WriteTerm _ t -> allocationAmount t
+
+align :: Int -> Int
+align n = ((n + 16 - 1) `div` 16) * 16
+
+bitfield :: [Type] -> String
+bitfield tys = show (bitfield' tys)
+
+bitfield' :: [Type] -> Integer
+bitfield' [] = 1
+bitfield' (ty:tys) =
+  case ty of
+    StringType -> 1 + 2 * bitfield' tys
+    TupleType _ -> 1 + 2 * bitfield' tys
+    SumType _ -> 1 + 2 * bitfield' tys
 
 putTerm :: Term -> M ()
 putTerm t =
@@ -138,28 +158,64 @@ putTerm t =
       put $ "s->f = " ++ s1 ++ ";"
       s2s <- mapM getIdent d2s
       forM_ (zip [0..] s2s) $ \ (i :: Int, s2) -> do
-        put $ "*(uintptr_t *)(s->arguments + " ++ show i ++ " * sizeof(uintptr_t)) = " ++ s2 ++ ";"
+        put $ "*(uintptr_t *)(s->arguments + " ++ show (i * 8) ++ ") = " ++ s2 ++ ";"
       put "return;"
     CaseTerm d1 c1s -> do
       s1 <- getIdent d1
-      put $ "switch (*(uintptr_t *)" ++ s1 ++ ") {"
+      put $ "switch (*(uint16_t *)(" ++ s1 ++ " + 2)) {"
       indent $ do
         mapM_ (uncurry (putRule s1)) (zip [0..] c1s)
       put $ "}"
     ConcatenateTerm d1 d2 d3 t1 -> do
+      _ <- todo "concat"
       s1 <- gen
       s2 <- getIdent d2
       s3 <- getIdent d3
-      _ <- todo "concatenate"
-      return ()
+      s4 <- gen
+      s5 <- gen
+      s6 <- gen
+      put $ "uintptr_t " ++ s4 ++ " = *(uintptr_t *)(" ++ s2 ++ " + sizeof(uintptr_t));"
+      put $ "uintptr_t " ++ s5 ++ " = *(uintptr_t *)(" ++ s3 ++ " + sizeof(uintptr_t));"
+      put $ "uintptr_t " ++ s6 ++ " = " ++ s4 ++ " + " ++ s5 ++ ";"
+      put $ "uintptr_t " ++ s1 ++ ";"
+      put $ "if (" ++ s4 ++ " == 0) {"
+      indent $ do
+        put $ s1 ++ " = " ++ s5 ++ ";"
+      put $ "} else if (" ++ s5 ++ " == 0) {"
+      indent $ do
+        put $ s1 ++ " = " ++ s4 ++ ";"
+      put $ "} else if (" ++ s6 ++ " > 32) {"
+      indent $ do
+        put $ "errx(EXIT_FAILURE, \"concatenation longer than 32\");"
+      put $ "} else {"
+      indent $ do
+        put $ s1 ++ " = frontier;"
+        put $ "frontier += sizeof(uintptr) + sizeof(uintptr) + ((" ++ s6 ++ " + sizeof(uintptr_t) - 1) / sizeof(uintptr_t)) * sizeof(uintptr_t);"
+        put $ "*" ++ s1 ++ " = 0;"
+        put $ "*(" ++ s1 ++ " + sizeof(uintptr_t)) = " ++ s6 ++ ";"
+        put $ "for (uintptr_t i = 0; i < " ++ s4 ++ "; i++) {"
+        indent $ do
+          put $ "*(uint8_t *)(" ++ s1 ++ " + sizeof(uintptr_t) + sizeof(uintptr_t) + i) = *(uint8_t)(" ++ s2 ++ " + sizeof(uintptr_t) + sizeof(uintptr_t) + i);"
+        put $ "}"
+        put $ "for (uintptr_t i = 0; i < " ++ s5 ++ "; i++) {"
+        indent $ do
+          put $ "*(uint8_t *)(" ++ s1 ++ " + sizeof(uintptr_t) + sizeof(uintptr_t) + " ++ s4 ++ " + i) = *(uint8_t)(" ++ s3 ++ " + sizeof(uintptr_t) + sizeof(uintptr_t) + i);"
+        put $ "}"
+      put $ "}"
+      bind d1 s2 $ do
+        putTerm t1
     ConstructorTerm d1 _ i d2s t1 -> do
       s1 <- gen
       s2s <- mapM getIdent d2s
       put $ "uintptr_t " ++ s1 ++ " = frontier;"
-      put $ "frontier += sizeof(uintptr_t) + " ++ show (length d2s) ++ " * sizeof(uintptr_t);"
-      put $ "*(uintptr_t *)" ++ s1 ++ " = " ++ show i ++ ";"
-      forM_ (zip s2s [1..]) $ \ (s2, i :: Int) -> do
-        put $ "*(uintptr_t *)(" ++ s1 ++ " + " ++ show i ++ " * sizeof(uintptr_t)) = " ++ s2 ++ ";"
+      put $ "frontier += " ++ show (align (8 + 8 + length d2s * 8)) ++ ";"
+      put $ "*(uint8_t *)" ++ s1 ++ " = 1;"
+      put $ "*(uint8_t *)(" ++ s1 ++ " + 1) = 0;"
+      put $ "*(uint16_t *)(" ++ s1 ++ " + 2) = " ++ show i ++ ";"
+      put $ "*(uint32_t *)(" ++ s1 ++ " + 4) = " ++ bitfield (map (const StringType) d2s) ++ ";"
+      put $ "*(uint64_t *)(" ++ s1 ++ " + 8) = 0;"
+      forM_ (zip s2s [0..]) $ \ (s2, i :: Int) -> do
+        put $ "*(uintptr_t *)(" ++ s1 ++ " + " ++ show (8 + 8 + i * 8) ++ ") = " ++ s2 ++ ";"
       bind d1 s1 $ do
         putTerm t1
     ExitTerm -> do
@@ -170,25 +226,31 @@ putTerm t =
       s1 <- gen
       i <- return $ length x2
       put $ "uintptr_t " ++ s1 ++ " = frontier;"
-      put $ "frontier += sizeof(uintptr_t) + sizeof(uintptr_t) + (" ++ show (length x2) ++ " + sizeof(uintptr_t) - 1) % sizeof(uintptr_t) * sizeof(uintptr_t);"
-      put $ "*(uintptr_t *)" ++ s1 ++ " = 0;"
-      put $ "*(uintptr_t *)(" ++ s1 ++ " + sizeof(uintptr_t)) = " ++ show i ++ ";"
+      put $ "frontier += " ++ show (align (8 + 8 + 8 + length x2)) ++ ";"
+      put $ "*(uint64_t *)" ++ s1 ++ " = 0;"
+      put $ "*(uint8_t *)" ++ s1 ++ " = 2;"
+      put $ "*(uint64_t *)(" ++ s1 ++ " + 8) = 0;"
+      put $ "*(uint64_t *)(" ++ s1 ++ " + 16) = " ++ show i ++ ";"
       s2 <- gen
-      put $ "uintptr_t " ++ s2 ++ " = (uintptr_t)" ++ show x2 ++ ";"
-      put $ "for (uintptr_t i = 0; i < " ++ show i ++ "; i++) {"
+      put $ "uint64_t " ++ s2 ++ " = (uint64_t)" ++ show x2 ++ ";"
+      put $ "for (uint64_t i = 0; i < " ++ show i ++ "; i++) {"
       indent $ do
-        put $ "*(char *)(" ++ s1 ++ " + 2 * sizeof(uintptr_t) + i) = *(char *)(" ++ s2 ++ " + i);"
+        put $ "*(char *)(" ++ s1 ++ " + 24 + i) = *(char *)(" ++ s2 ++ " + i);"
       put $ "}"
       bind d1 s1 $ do
         putTerm t1
     TupleTerm d1 d2s t1 -> do
       s1 <- gen
-      put $ "uintptr_t " ++ s1 ++ " = frontier;"
-      put $ "frontier += sizeof(uintptr_t) + " ++ show (length d2s) ++ " * sizeof(uintptr_t);"
-      put $ "*(uintptr_t *)" ++ s1 ++ " = 0;"
+      put $ "uint64_t " ++ s1 ++ " = frontier;"
+      put $ "frontier += " ++ show (align (8 + 8 + length d2s * 8)) ++ ";"
+      put $ "*(uint8_t *)" ++ s1 ++ " = 0;"
+      put $ "*(uint8_t *)(" ++ s1 ++ " + 1) = 0;"
+      put $ "*(uint16_t *)(" ++ s1 ++ " + 2) = 0;"
+      put $ "*(uint32_t *)(" ++ s1 ++ " + 4) = " ++ bitfield (map (const StringType) d2s) ++ ";"
+      put $ "*(uint64_t *)(" ++ s1 ++ " + 8) = 0;"
       forM_ (zip [0..] d2s) $ \ (i :: Int, d2) -> do
         s2 <- getIdent d2
-        put $ "*(uintptr_t *)(" ++ s1 ++ " + sizeof(uintptr_t) + " ++ show i ++ " * sizeof(uintptr_t)) = " ++ s2 ++ ";"
+        put $ "*(uint64_t *)(" ++ s1 ++ " + " ++ show (8 + 8 + i * 8) ++ ") = " ++ s2 ++ ";"
       bind d1 s1 $ do
         putTerm t1
     UnreachableTerm -> do
@@ -198,15 +260,15 @@ putTerm t =
     UntupleTerm d1s d2 t1 -> do
       s1s <- mapM (const gen) d1s
       s2 <- getIdent d2
-      forM_ (zip3 d1s s1s [1..]) $ \ (d1, s1, i :: Int) -> do
-        put $ "uintptr_t " ++ s1 ++ " = *(uintptr_t *)(" ++ s2 ++ " + " ++ show i ++ " * sizeof(uintptr_t));"
+      forM_ (zip s1s [0..]) $ \ (s1, i :: Int) -> do
+        put $ "uint64_t " ++ s1 ++ " = *(uint64_t *)(" ++ s2 ++ " + " ++ show (8 + 8 + i * 8) ++ ");"
       binds d1s s1s $ do
         putTerm t1
     WriteTerm d1 t1 -> do
       s1 <- getIdent d1
       s2 <- gen
-      put $ "uintptr_t " ++ s2 ++ " = *(uintptr_t *)(" ++ s1 ++ " + sizeof(uintptr_t));"
-      put $ "write(1, (uint8_t *)(" ++ s1 ++ " + 2 * sizeof(uintptr_t)), (size_t)" ++ s2 ++ ");"
+      put $ "uint64_t " ++ s2 ++ " = *(uint64_t *)(" ++ s1 ++ " + 16);"
+      put $ "write(1, (uint8_t *)(" ++ s1 ++ " + 24), (size_t)" ++ s2 ++ ");"
       put $ "write(1, \"\\n\", 1);"
       putTerm t1
 
@@ -215,8 +277,8 @@ putRule s1 i (d2s, t1) = do
   s2s <- mapM (const gen) d2s
   put $ "case " ++ show i ++ ": {"
   indent $ do
-    forM_ (zip s2s [1..]) $ \ (s2, i :: Int) -> do
-      put $ "uintptr_t " ++ s2 ++ " = *(uintptr_t *)(" ++ s1 ++ " + " ++ show i ++ " * sizeof(uintptr_t));"
+    forM_ (zip s2s [0..]) $ \ (s2, i :: Int) -> do
+      put $ "uintptr_t " ++ s2 ++ " = *(uintptr_t *)(" ++ s1 ++ " + " ++ show (8 + 8 + i * 8) ++ ");"
     binds d2s s2s $ do
       putTerm t1
   put $ "}"
