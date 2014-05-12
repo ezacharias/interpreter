@@ -29,6 +29,7 @@ run h p m = runM m s (\ () _ -> return ()) 0
 
 putIncludes :: M ()
 putIncludes = do
+  put $ "#include <assert.h>"
   put $ "#include <err.h>"
   put $ "#include <stdint.h>"
   put $ "#include <stdio.h>"
@@ -99,6 +100,7 @@ putGC = do
 
 putFun :: (Ident, Fun) -> M ()
 putFun (d, Fun ds tys t) = do
+  if (length ds == length tys) then return () else error "length"
   resetLocals
   s <- getFunName d
   n <- return $ allocationAmount t
@@ -108,13 +110,17 @@ putFun (d, Fun ds tys t) = do
     put $ "uint64_t frontier = s->frontier;"
     put $ "if (frontier + " ++ show n ++ " > s->limit) {"
     indent $ do
+      put $ "printf(\"gc: " ++ s ++ " " ++ show (length ds) ++ "\\n\");"
       put $ "s->f = gc;"
       put $ "s->saved = " ++ s ++ ";"
       put $ "s->argument_bitfield = " ++ bitfield tys ++ ";"
+      forM_ (zip ss [0..]) $ \ (s, i :: Int) -> do
+        put $ "assert(s->arguments[" ++ show i ++ "] != 0);"
       put "return;"
     put $ "}"
     forM_ (zip ss [0..]) $ \ (s, i :: Int) -> do
-      put $ "uint64_t " ++ s ++ " = *(uint64_t *)(s->arguments + " ++ show (i * 8) ++ ");"
+      put $ "uint64_t " ++ s ++ " = s->arguments[" ++ show i ++ "];"
+      put $ "assert(" ++ s ++ " != 0);"
     binds ds ss $ do
       putTerm t
   put $ "}"
@@ -158,7 +164,8 @@ putTerm t =
       put $ "s->f = " ++ s1 ++ ";"
       s2s <- mapM getIdent d2s
       forM_ (zip [0..] s2s) $ \ (i :: Int, s2) -> do
-        put $ "*(uintptr_t *)(s->arguments + " ++ show (i * 8) ++ ") = " ++ s2 ++ ";"
+        put $ "assert(" ++ s2 ++ " != 0);"
+        put $ "s->arguments[" ++ show i ++ "] = " ++ s2 ++ ";"
       put "return;"
     CaseTerm d1 c1s -> do
       s1 <- getIdent d1
@@ -174,10 +181,10 @@ putTerm t =
       s4 <- gen
       s5 <- gen
       s6 <- gen
-      put $ "uintptr_t " ++ s4 ++ " = *(uintptr_t *)(" ++ s2 ++ " + sizeof(uintptr_t));"
-      put $ "uintptr_t " ++ s5 ++ " = *(uintptr_t *)(" ++ s3 ++ " + sizeof(uintptr_t));"
-      put $ "uintptr_t " ++ s6 ++ " = " ++ s4 ++ " + " ++ s5 ++ ";"
-      put $ "uintptr_t " ++ s1 ++ ";"
+      put $ "uint64_t " ++ s4 ++ " = *(uint64_t *)(" ++ s2 ++ " + sizeof(uint64_t));"
+      put $ "uint64_t " ++ s5 ++ " = *(uint64_t *)(" ++ s3 ++ " + sizeof(uint64_t));"
+      put $ "uint64_t " ++ s6 ++ " = " ++ s4 ++ " + " ++ s5 ++ ";"
+      put $ "uint64_t " ++ s1 ++ ";"
       put $ "if (" ++ s4 ++ " == 0) {"
       indent $ do
         put $ s1 ++ " = " ++ s5 ++ ";"
@@ -190,16 +197,16 @@ putTerm t =
       put $ "} else {"
       indent $ do
         put $ s1 ++ " = frontier;"
-        put $ "frontier += sizeof(uintptr) + sizeof(uintptr) + ((" ++ s6 ++ " + sizeof(uintptr_t) - 1) / sizeof(uintptr_t)) * sizeof(uintptr_t);"
+        put $ "frontier += sizeof(uintptr) + sizeof(uintptr) + ((" ++ s6 ++ " + sizeof(uint64_t) - 1) / sizeof(uint64_t)) * sizeof(uint64_t);"
         put $ "*" ++ s1 ++ " = 0;"
-        put $ "*(" ++ s1 ++ " + sizeof(uintptr_t)) = " ++ s6 ++ ";"
-        put $ "for (uintptr_t i = 0; i < " ++ s4 ++ "; i++) {"
+        put $ "*(" ++ s1 ++ " + sizeof(uint64_t)) = " ++ s6 ++ ";"
+        put $ "for (uint64_t i = 0; i < " ++ s4 ++ "; i++) {"
         indent $ do
-          put $ "*(uint8_t *)(" ++ s1 ++ " + sizeof(uintptr_t) + sizeof(uintptr_t) + i) = *(uint8_t)(" ++ s2 ++ " + sizeof(uintptr_t) + sizeof(uintptr_t) + i);"
+          put $ "*(uint8_t *)(" ++ s1 ++ " + sizeof(uint64_t) + sizeof(uint64_t) + i) = *(uint8_t)(" ++ s2 ++ " + sizeof(uint64_t) + sizeof(uint64_t) + i);"
         put $ "}"
-        put $ "for (uintptr_t i = 0; i < " ++ s5 ++ "; i++) {"
+        put $ "for (uint64_t i = 0; i < " ++ s5 ++ "; i++) {"
         indent $ do
-          put $ "*(uint8_t *)(" ++ s1 ++ " + sizeof(uintptr_t) + sizeof(uintptr_t) + " ++ s4 ++ " + i) = *(uint8_t)(" ++ s3 ++ " + sizeof(uintptr_t) + sizeof(uintptr_t) + i);"
+          put $ "*(uint8_t *)(" ++ s1 ++ " + sizeof(uint64_t) + sizeof(uint64_t) + " ++ s4 ++ " + i) = *(uint8_t)(" ++ s3 ++ " + sizeof(uint64_t) + sizeof(uint64_t) + i);"
         put $ "}"
       put $ "}"
       bind d1 s2 $ do
@@ -207,7 +214,7 @@ putTerm t =
     ConstructorTerm d1 _ i d2s t1 -> do
       s1 <- gen
       s2s <- mapM getIdent d2s
-      put $ "uintptr_t " ++ s1 ++ " = frontier;"
+      put $ "uint64_t " ++ s1 ++ " = frontier;"
       put $ "frontier += " ++ show (align (8 + 8 + length d2s * 8)) ++ ";"
       put $ "*(uint8_t *)" ++ s1 ++ " = 1;"
       put $ "*(uint8_t *)(" ++ s1 ++ " + 1) = 0;"
@@ -215,7 +222,7 @@ putTerm t =
       put $ "*(uint32_t *)(" ++ s1 ++ " + 4) = " ++ bitfield (map (const StringType) d2s) ++ ";"
       put $ "*(uint64_t *)(" ++ s1 ++ " + 8) = 0;"
       forM_ (zip s2s [0..]) $ \ (s2, i :: Int) -> do
-        put $ "*(uintptr_t *)(" ++ s1 ++ " + " ++ show (8 + 8 + i * 8) ++ ") = " ++ s2 ++ ";"
+        put $ "*(uint64_t *)(" ++ s1 ++ " + " ++ show (8 + 8 + i * 8) ++ ") = " ++ s2 ++ ";"
       bind d1 s1 $ do
         putTerm t1
     ExitTerm -> do
@@ -225,7 +232,7 @@ putTerm t =
     StringTerm d1 x2 t1 -> do
       s1 <- gen
       i <- return $ length x2
-      put $ "uintptr_t " ++ s1 ++ " = frontier;"
+      put $ "uint64_t " ++ s1 ++ " = frontier;"
       put $ "frontier += " ++ show (align (8 + 8 + 8 + length x2)) ++ ";"
       put $ "*(uint64_t *)" ++ s1 ++ " = 0;"
       put $ "*(uint8_t *)" ++ s1 ++ " = 2;"
@@ -278,7 +285,7 @@ putRule s1 i (d2s, t1) = do
   put $ "case " ++ show i ++ ": {"
   indent $ do
     forM_ (zip s2s [0..]) $ \ (s2, i :: Int) -> do
-      put $ "uintptr_t " ++ s2 ++ " = *(uintptr_t *)(" ++ s1 ++ " + " ++ show (8 + 8 + i * 8) ++ ");"
+      put $ "uint64_t " ++ s2 ++ " = *(uint64_t *)(" ++ s1 ++ " + " ++ show (8 + 8 + i * 8) ++ ");"
     binds d2s s2s $ do
       putTerm t1
   put $ "}"
