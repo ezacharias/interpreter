@@ -11,12 +11,8 @@ import           Compiler.Direct
 convert :: Handle -> Program -> IO ()
 convert h p = run h p $ do
   putIncludes
-  putStateStruct
   putPrototypes (length (programFuns p))
   putMain (programStart p)
-  putFinished
-  putUnreachable
-  putGC
   mapM_ putFun (programFuns p)
 
 run :: Handle -> Program -> M () -> IO ()
@@ -29,31 +25,11 @@ run h p m = runM m s (\ () _ -> return ()) 0
 
 putIncludes :: M ()
 putIncludes = do
-  put $ "#include <assert.h>"
-  put $ "#include <err.h>"
-  put $ "#include <stdint.h>"
-  put $ "#include <stdio.h>"
-  put $ "#include <stdlib.h>"
-  put $ "#include <unistd.h>"
-
-putStateStruct :: M ()
-putStateStruct = do
-  put $ "struct state {"
-  indent $ do
-    put $ "uint64_t frontier;"
-    put $ "uint64_t limit;"
-    put $ "void (*f)(struct state *);"
-    put $ "uint64_t arguments[31];"
-    put $ "void (*saved)(struct state *);"
-    put $ "uint32_t argument_bitfield;"
-  put $ "};"
+  put $ "#include \"header.h\""
 
 putPrototypes :: Int -> M ()
 putPrototypes i = do
   put $ "extern int main();"
-  put $ "static void finished(struct state *);"
-  put $ "static void unreachable(struct state *);"
-  put $ "static void gc(struct state *);"
   forM_ (take i [0..]) $ \ (i :: Int) -> do
     put $ "static void f" ++ show i ++ "(struct state *);"
 
@@ -64,38 +40,15 @@ putMain d = do
   put "extern int main() {"
   indent $ do
     put $ "struct state *s = (struct state *)malloc(sizeof(struct state));"
-    put $ "s->frontier = (uint64_t)malloc(1024 * 1024);"
-    put $ "s->limit = s->frontier + 1024 * 1024;"
+    put $ "s->sentinel = 1;"
+    put $ "s->frontier = (uint64_t)malloc(HEAP_SIZE);"
+    put $ "s->limit = s->frontier + HEAP_SIZE;"
     put $ "s->f = " ++ s ++ ";"
     put $ "for (;;) {"
     indent $ do
       put $ "s->f(s);"
     put $ "}"
     put $ "return EXIT_SUCCESS;"
-  put $ "}"
-
-putFinished :: M ()
-putFinished = do
-  put $ "static void finished(struct state *s) {"
-  indent $ do
-    put $ "exit(EXIT_SUCCESS);"
-    put $ "return;"
-  put "}"
-
-putUnreachable :: M ()
-putUnreachable = do
-  put $ "static void unreachable(struct state *s) {"
-  indent $ do
-    put $ "errx(EXIT_FAILURE, \"unreachable\");"
-    put $ "return;"
-  put $ "}"
-
-putGC :: M ()
-putGC = do
-  put $ "static void gc(struct state *s) {"
-  indent $ do
-    put $ "errx(EXIT_FAILURE, \"out of memory\");"
-    put $ "return;"
   put $ "}"
 
 putFun :: (Ident, Fun) -> M ()
@@ -107,20 +60,19 @@ putFun (d, Fun ds tys t) = do
   ss <- mapM (const gen) ds
   put $ "static void " ++ s ++ "(struct state *s) {"
   indent $ do
+    -- put $ "printf(\"" ++ s ++ " start\\n\");"
     put $ "uint64_t frontier = s->frontier;"
-    put $ "if (frontier + " ++ show n ++ " > s->limit) {"
+    put $ "if (frontier + " ++ show n ++ " >= s->limit) {"
     indent $ do
       put $ "printf(\"gc: " ++ s ++ " " ++ show (length ds) ++ "\\n\");"
       put $ "s->f = gc;"
       put $ "s->saved = " ++ s ++ ";"
       put $ "s->argument_bitfield = " ++ bitfield tys ++ ";"
-      forM_ (zip ss [0..]) $ \ (s, i :: Int) -> do
-        put $ "assert(s->arguments[" ++ show i ++ "] != 0);"
       put "return;"
     put $ "}"
     forM_ (zip ss [0..]) $ \ (s, i :: Int) -> do
       put $ "uint64_t " ++ s ++ " = s->arguments[" ++ show i ++ "];"
-      put $ "assert(" ++ s ++ " != 0);"
+      put $ "check_one(s, " ++ s ++ ");"
     binds ds ss $ do
       putTerm t
   put $ "}"
@@ -172,6 +124,10 @@ putTerm t =
       put $ "switch (*(uint16_t *)(" ++ s1 ++ " + 2)) {"
       indent $ do
         mapM_ (uncurry (putRule s1)) (zip [0..] c1s)
+        put "default: {"
+        indent $ do
+          put $ "errx(EXIT_FAILURE, \"bad constructor\");"
+        put $ "}"
       put $ "}"
     ConcatenateTerm d1 d2 d3 t1 -> do
       _ <- todo "concat"
@@ -223,6 +179,7 @@ putTerm t =
       put $ "*(uint64_t *)(" ++ s1 ++ " + 8) = 0;"
       forM_ (zip s2s [0..]) $ \ (s2, i :: Int) -> do
         put $ "*(uint64_t *)(" ++ s1 ++ " + " ++ show (8 + 8 + i * 8) ++ ") = " ++ s2 ++ ";"
+      put $ "check_one(s, " ++ s1 ++ ");"
       bind d1 s1 $ do
         putTerm t1
     ExitTerm -> do
@@ -248,6 +205,7 @@ putTerm t =
         putTerm t1
     TupleTerm d1 d2s t1 -> do
       s1 <- gen
+      s2s <- mapM getIdent d2s
       put $ "uint64_t " ++ s1 ++ " = frontier;"
       put $ "frontier += " ++ show (align (8 + 8 + length d2s * 8)) ++ ";"
       put $ "*(uint8_t *)" ++ s1 ++ " = 0;"
@@ -255,9 +213,9 @@ putTerm t =
       put $ "*(uint16_t *)(" ++ s1 ++ " + 2) = 0;"
       put $ "*(uint32_t *)(" ++ s1 ++ " + 4) = " ++ bitfield (map (const StringType) d2s) ++ ";"
       put $ "*(uint64_t *)(" ++ s1 ++ " + 8) = 0;"
-      forM_ (zip [0..] d2s) $ \ (i :: Int, d2) -> do
-        s2 <- getIdent d2
+      forM_ (zip [0..] s2s) $ \ (i :: Int, s2) -> do
         put $ "*(uint64_t *)(" ++ s1 ++ " + " ++ show (8 + 8 + i * 8) ++ ") = " ++ s2 ++ ";"
+      put $ "check_one(s, " ++ s1 ++ ");"
       bind d1 s1 $ do
         putTerm t1
     UnreachableTerm -> do
@@ -269,6 +227,7 @@ putTerm t =
       s2 <- getIdent d2
       forM_ (zip s1s [0..]) $ \ (s1, i :: Int) -> do
         put $ "uint64_t " ++ s1 ++ " = *(uint64_t *)(" ++ s2 ++ " + " ++ show (8 + 8 + i * 8) ++ ");"
+        put $ "check_one(s, " ++ s1 ++ ");"
       binds d1s s1s $ do
         putTerm t1
     WriteTerm d1 t1 -> do

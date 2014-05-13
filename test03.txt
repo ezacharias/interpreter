@@ -1,0 +1,11 @@
+Loops forever.
+
+
+    Main : Output
+      F(())
+
+    F(()) : Output
+      G()
+
+    G() : Output
+      F(())
