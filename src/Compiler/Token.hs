@@ -34,4 +34,4 @@ data Token = EqualsToken
            | ComposeToken
            | BangToken
            | StringToken String
-  deriving (Eq, Show)
+             deriving (Eq, Show)

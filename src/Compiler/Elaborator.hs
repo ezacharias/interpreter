@@ -3,7 +3,7 @@ module Compiler.Elaborator where
 import           Control.Monad   (MonadPlus, forM, liftM, liftM2, mplus, msum,
                                   mzero, (<=<))
 import qualified Data.IntMap     as IdentMap
-import           Data.List (union)
+import           Data.List       (union)
 import           Data.Map        (Map)
 import qualified Data.Map        as Map
 import           Data.Maybe      (fromMaybe)
@@ -14,9 +14,9 @@ import qualified Compiler.Type   as Type
 
 type IdentMap = IdentMap.IntMap
 
--- To elaborate we simply get the identifier for Main. This will add
--- elaboration of Main to the work queue. When finish is called, Main will be
--- elaborated, which will in turn add more work to the work queue and so on.
+-- | To elaborate we simply get the identifier for Main. This will add
+--   elaboration of Main to the work queue. When finish is called, Main will be
+--   elaborated, which will in turn add more work to the work queue and so on.
 elaborate :: Syntax.Program -> Simple.Program
 elaborate p = run $ do
   addRes $ Simple.SumType 0

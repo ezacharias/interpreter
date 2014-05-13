@@ -3,28 +3,29 @@
 module Compiler.Driver where
 
 import           Control.Monad
-import           System.Exit               (exitFailure)
+import           System.Exit                 (exitFailure)
 import           System.IO
 
-import qualified Compiler.C.Converter as C.Converter
-import qualified Compiler.CPS              as CPS
-import qualified Compiler.CPS.Check as CPS.Check
-import qualified Compiler.CPS.Convert      as CPS.Convert
-import qualified Compiler.CPS.Interpreter  as Interpreter
-import qualified Compiler.Direct           as Direct
-import qualified Compiler.Direct.Check     as Direct.Check
-import qualified Compiler.Direct.Converter as Direct.Converter
+import qualified Compiler.C.Converter        as C.Converter
+import qualified Compiler.CPS                as CPS
+import qualified Compiler.CPS.Check          as CPS.Check
+import qualified Compiler.CPS.Convert        as CPS.Convert
+import qualified Compiler.CPS.Interpreter    as Interpreter
+import qualified Compiler.Direct             as Direct
+import qualified Compiler.Direct.Check       as Direct.Check
+import qualified Compiler.Direct.Converter   as Direct.Converter
 import qualified Compiler.Direct.Interpreter as Direct.Interpreter
-import qualified Compiler.Elaborator       as Elaborator
-import qualified Compiler.Meta             as Meta
+import qualified Compiler.Elaborator         as Elaborator
+import qualified Compiler.Meta               as Meta
 import           Compiler.Parser
-import qualified Compiler.Simple           as Simple
-import qualified Compiler.Simple.Check     as Simple.Check
-import qualified Compiler.Syntax           as Syntax
-import qualified Compiler.SyntaxChecker    as SyntaxChecker
+import qualified Compiler.Simple             as Simple
+import qualified Compiler.Simple.Check       as Simple.Check
+import qualified Compiler.Simple.Interpreter as Simple.Interpreter
+import qualified Compiler.Syntax             as Syntax
+import qualified Compiler.SyntaxChecker      as SyntaxChecker
 import           Compiler.Token
 import           Compiler.Tokenizer
-import qualified Compiler.TypeChecker      as TypeChecker
+import qualified Compiler.TypeChecker        as TypeChecker
 
 data Driver a = DriverReturn a
               | DriverPerformIO (IO (Driver a))
@@ -46,19 +47,27 @@ liftIO io = DriverPerformIO (liftM return io)
 
 -- | Takes a filename and interprets the file.
 interpreter :: String -> Driver ()
-interpreter = parse         >=> foo
-          >=> syntaxCheck   >=> foo
-          >=> typeCheck     >=> foo
-          >=> elaborate     >=> foo >=> simpleCheck
-          >=> cpsConvert    >=> foo >=> cpsCheck
-          >=> directConvert >=> foo >=> directCheck
-          >=> cConvert
+interpreter = parse         >=> strict
+          >=> syntaxCheck   >=> strict
+          >=> typeCheck     >=> strict
+          >=> elaborate     >=> strict >=> simpleCheck
+          >=> cpsConvert    >=> strict >=> cpsCheck
+          >=> directConvert >=> strict >=> directCheck
+          >=> directInterpret
 
-foo :: Show a => a -> Driver a
-foo x = liftIO (writeFile "/dev/null" (show x)) >> return x
+-- | Takes a filename and outputs C code to file stdout.
+compiler :: String -> Driver ()
+compiler = parse
+       >=> syntaxCheck   >=> strict
+       >=> typeCheck     >=> strict
+       >=> elaborate     >=> strict >=> simpleCheck
+       >=> cpsConvert    >=> strict >=> cpsCheck
+       >=> directConvert >=> strict >=> directCheck
+       >=> cConvert
 
-floop :: Show a => a -> Driver b
-floop x = liftIO (writeFile "/dev/null" (show x)) >> liftIO exitFailure
+-- | Writes the value to stdout to make sure it is fully evaluated at this point.
+strict :: Show a => a -> Driver a
+strict x = liftIO (writeFile "/dev/null" (show x)) >> return x
 
 -- | Used for testing purposes only.
 tokenize :: String -> Driver [(Position, Token)]
@@ -110,11 +119,28 @@ typeCheck x = check $ TypeChecker.inferProgram (Meta.addMetavariables x)
 elaborate :: Syntax.Program -> Driver Simple.Program
 elaborate x = return $ Elaborator.elaborate x
 
+simpleCheck :: Simple.Program -> Driver Simple.Program
+simpleCheck x = check $ Simple.Check.check x
+  where check Nothing  = return x
+        check (Just s) = DriverError $ "simple check failed: " ++ s
+
+simpleInterpret :: Simple.Program -> Driver ()
+simpleInterpret p = check $ Simple.Interpreter.interpret p
+  where check Simple.Interpreter.ExitStatus         = return ()
+        check (Simple.Interpreter.EscapeStatus _ _) = DriverError "interpreter resulted in an uncaught throw"
+        check Simple.Interpreter.UndefinedStatus    = DriverError "interpreter resulted in unreachable"
+        check (Simple.Interpreter.WriteStatus s x)  = liftIO (putStrLn s) >> check x
+
 cpsConvert :: Simple.Program -> Driver CPS.Program
 cpsConvert x = return $ CPS.Convert.convert x
 
-interpret :: CPS.Program -> Driver ()
-interpret p = check $ Interpreter.interpret p
+cpsCheck :: CPS.Program -> Driver CPS.Program
+cpsCheck x = check $ CPS.Check.check x
+  where check Nothing  = return x
+        check (Just s) = DriverError $ "cps check failed: " ++ s
+
+cpsInterpret :: CPS.Program -> Driver ()
+cpsInterpret p = check $ Interpreter.interpret p
   where check Interpreter.ExitStatus         = return ()
         check (Interpreter.EscapeStatus _ _) = DriverError "interpreter resulted in an uncaught throw"
         check Interpreter.UndefinedStatus    = DriverError "interpreter resulted in unreachable"
@@ -123,27 +149,17 @@ interpret p = check $ Interpreter.interpret p
 directConvert :: CPS.Program -> Driver Direct.Program
 directConvert x = return $ Direct.Converter.convert x
 
+directCheck :: Direct.Program -> Driver Direct.Program
+directCheck x = check $ Direct.Check.check x
+  where check Nothing  = return x
+        check (Just s) = DriverError $ "direct check failed: " ++ s
+
 directInterpret :: Direct.Program -> Driver ()
 directInterpret p = check $ Direct.Interpreter.interpret p
   where check Direct.Interpreter.ExitStatus         = return ()
         check (Direct.Interpreter.EscapeStatus _ _) = DriverError "interpreter resulted in an uncaught throw"
         check Direct.Interpreter.UndefinedStatus    = DriverError "interpreter resulted in unreachable"
         check (Direct.Interpreter.WriteStatus s x)  = liftIO (putStrLn s) >> check x
-
-simpleCheck :: Simple.Program -> Driver Simple.Program
-simpleCheck x = check $ Simple.Check.check x
-  where check Nothing  = return x
-        check (Just s) = DriverError $ "simple check failed: " ++ s
-
-cpsCheck :: CPS.Program -> Driver CPS.Program
-cpsCheck x = check $ CPS.Check.check x
-  where check Nothing  = return x
-        check (Just s) = DriverError $ "cps check failed: " ++ s
-
-directCheck :: Direct.Program -> Driver Direct.Program
-directCheck x = check $ Direct.Check.check x
-  where check Nothing  = return x
-        check (Just s) = DriverError $ "direct check failed: " ++ s
 
 cConvert :: Direct.Program -> Driver ()
 cConvert x = liftIO $ C.Converter.convert stdout x

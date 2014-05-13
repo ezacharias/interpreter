@@ -10,8 +10,7 @@ data Parser = ParserFinished Syntax.Program
             | ParserError Position String
             | ParserTokenizerError Position
 
--- The parser is formed from the tokenizer and the tokenParser.
-
+-- | The parser is formed from the tokenizer and the tokenParser.
 parser :: String -> Parser
 parser filename = parse tokenizer tokenParser
   where parse :: Tokenizer -> TokenParser Syntax.Program -> Parser

@@ -14,8 +14,8 @@ import qualified Compiler.Type       as Type
 
 -- | A token parser is a data structure which is incrementally fed tokens and returns the result.
 data TokenParser a = TokenParserFinished a
-                   -- | Passed Nothing if at EOF.
                    | TokenParserTokenRequest ((String, Position, Maybe Token) -> TokenParser a)
+                   -- | ^ Passed Nothing if at EOF.
                    | TokenParserError Position String
 
 tokenParser :: TokenParser Syntax.Program

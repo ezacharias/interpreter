@@ -1,44 +1,42 @@
--- The language stripped of syntactic sugar. Polymorphism has been eliminated.
--- The module system has been eliminated. All variables use integers rather than strings.
+-- | The language stripped of syntactic sugar. Polymorphism has been eliminated.
+--   The module system has been eliminated. All variables use integers rather than strings.
 module Compiler.Simple where
-
 
 type Ident = Int
 type Index = Int
 
--- A program is a set of tag declarations, sum type declarations, function
--- declarations, and a main function.
+-- | We track every tag used in catch and throw as well as every result type
+--   used in the body of catch. This is used in CPS conversion.
 data Program = Program
- { programTags :: [(Ident, Tag)]
- , programRess :: [Type]
- , programSums :: [(Ident, Sum)]
- , programFuns :: [(Ident, Fun)]
- , programMain :: Ident
- } deriving (Eq, Ord, Show)
+             { programTags :: [(Ident, Tag)]
+             , programRess :: [Type]
+             , programSums :: [(Ident, Sum)]
+             , programFuns :: [(Ident, Fun)]
+             , programMain :: Ident
+             } deriving (Eq, Ord, Show)
 
 -- The first type is the type of the argument to Throw. The second type is the
 -- type of the return from Throw.
 data Tag = Tag Type Type
-   deriving (Eq, Ord, Show)
+           deriving (Eq, Ord, Show)
 
 -- A sum type contains a list of constructors. Each constructor contains a list
 -- of argument types.
 data Sum = Sum [[Type]]
-   deriving (Eq, Ord, Show)
+           deriving (Eq, Ord, Show)
 
 -- Functions are actually called with no arguments. Hence, they are just a
 -- return type and a term. To take an argument, the term returns a lambda
 -- expression.
 data Fun = Fun Type Term
-   deriving (Eq, Ord, Show)
+           deriving (Eq, Ord, Show)
 
-data Type =
-   ArrowType Type Type
- | StringType
- | TupleType [Type]
- | UnitType
- | SumType Ident
-   deriving (Eq, Ord, Show)
+data Type = ArrowType Type Type
+          | StringType
+          | TupleType [Type]
+          | UnitType
+          | SumType Ident
+            deriving (Eq, Ord, Show)
 
 -- Let's go over the terms one at a time.
 --

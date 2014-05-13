@@ -22,7 +22,7 @@ present c t@(TokenizerError pos)       = t
 tokenizer :: Tokenizer
 tokenizer = unsure posStart
 
--- Start of file or after two blank lines.
+-- | Start of file or after two blank lines.
 unsure :: Position -> Tokenizer
 unsure pos = TokenizerCharRequest check
   where check Nothing = TokenizerEndOfFile pos
@@ -115,6 +115,13 @@ dash pos = TokenizerCharRequest check
         test '-' = skipLine (colSucc pos)
         test _ = TokenizerError pos
 
+skipLine :: Position -> Tokenizer
+skipLine pos = TokenizerCharRequest check
+  where check Nothing = TokenizerEndOfFile pos
+        check (Just c) = test c
+        test '\n' = codeBlankLine1 (lineSucc pos)
+        test _    = skipLine (colSucc pos)
+
 dot :: Position -> Tokenizer
 dot pos = TokenizerCharRequest check
   where check Nothing = TokenizerError pos
@@ -123,17 +130,10 @@ dot pos = TokenizerCharRequest check
         test c | 'A' <= c && c <= 'Z' = dotUpper (colSucc pos) pos [c]
         test _ = TokenizerError pos
 
-skipLine :: Position -> Tokenizer
-skipLine pos = TokenizerCharRequest check
-  where check Nothing = TokenizerEndOfFile pos
-        check (Just c) = test c
-        test '\n' = codeBlankLine1 (lineSucc pos)
-        test _    = skipLine (colSucc pos)
+-- | In digit, lower, and upper, we pass a reversed string of matched characters to use when matching is complete.
+type Reversed a = a
 
--- In digit, lower, and upper, we pass a reversed string of matched characters to use when matching is complete.
-type ReversedString = String
-
-digit :: Position -> Position -> ReversedString -> Tokenizer
+digit :: Position -> Position -> Reversed String -> Tokenizer
 digit pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (IntToken (read $ reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
@@ -141,7 +141,7 @@ digit pos' pos cs = TokenizerCharRequest check
                   = digit (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (IntToken (read $ reverse cs)) (present c $ tok pos')
 
-lower :: Position -> Position -> ReversedString -> Tokenizer
+lower :: Position -> Position -> Reversed String -> Tokenizer
 lower pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (LowerToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
@@ -149,7 +149,7 @@ lower pos' pos cs = TokenizerCharRequest check
                   = lower (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (LowerToken (reverse cs)) (present c $ tok pos')
 
-upper :: Position -> Position -> ReversedString -> Tokenizer
+upper :: Position -> Position -> Reversed String -> Tokenizer
 upper pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (UpperToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
@@ -157,7 +157,7 @@ upper pos' pos cs = TokenizerCharRequest check
                   = upper (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (UpperToken (reverse cs)) (present c $ tok pos')
 
-dotLower :: Position -> Position -> ReversedString -> Tokenizer
+dotLower :: Position -> Position -> Reversed String -> Tokenizer
 dotLower pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (DotLowerToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
@@ -165,7 +165,7 @@ dotLower pos' pos cs = TokenizerCharRequest check
                   = dotLower (colSucc pos') pos (c:cs)
         test c    = TokenizerToken pos (DotLowerToken (reverse cs)) (present c $ tok pos')
 
-dotUpper :: Position -> Position -> ReversedString -> Tokenizer
+dotUpper :: Position -> Position -> Reversed String -> Tokenizer
 dotUpper pos' pos cs = TokenizerCharRequest check
   where check Nothing = TokenizerToken pos (DotUpperToken (reverse cs)) (TokenizerEndOfFile pos)
         check (Just c) = test c
@@ -174,10 +174,10 @@ dotUpper pos' pos cs = TokenizerCharRequest check
         test c    = TokenizerToken pos (DotUpperToken (reverse cs)) (present c $ tok pos')
 
 -- This should test to make sure only valid characters are within a string
--- literal. It should also handle escapes correctly. The integer is the
--- nesting level.
+-- literal. It should also handle escapes correctly.
 
-string :: Position -> Position -> Int -> ReversedString -> Tokenizer
+-- | The integer is the nesting level, because smart quotes allow nesting of strings.
+string :: Position -> Position -> Int -> Reversed String -> Tokenizer
 string pos' pos n cs = TokenizerCharRequest (check n)
   where check n Nothing = TokenizerError pos
         check n (Just c) = test n c

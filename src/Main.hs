@@ -6,9 +6,7 @@ import           System.Environment
 import           Compiler.Driver
 
 main :: IO ()
-main = do -- putStrLn "Starting"
-          drive . interpreter =<< getFilename
-          -- putStrLn "Finished"
+main = drive . interpreter =<< getFilename
 
 getFilename :: IO String
 getFilename = getArgs >>= check

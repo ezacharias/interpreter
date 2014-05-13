@@ -51,7 +51,7 @@ data Pat = AscribePat Pos Type.Type Pat Type
          | UnitPat Pos
          | UpperPat Pos Type.Path [Type.Type] Type.Type [(String, [()])] Path [Pat]
           -- ^ Full path of the constructor, constructor argument types, constructor return type, all constructors.
-           deriving (Eq, Show)
+          deriving (Eq, Show)
 
 data Type = ArrowType Type Type
           | LowerType Pos String
@@ -61,6 +61,5 @@ data Type = ArrowType Type Type
             deriving (Eq, Show)
 
 -- | Position filename line col.
-
 data Pos = Pos String Int Int
            deriving (Eq, Show)

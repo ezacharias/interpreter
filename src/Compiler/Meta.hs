@@ -1,15 +1,11 @@
 module Compiler.Meta where
 
-import Control.Applicative (Alternative, empty, (<|>))
-import Control.Monad (liftM)
-import Data.Maybe (fromMaybe)
-import Debug.Trace (trace)
+import           Control.Applicative (Alternative, empty, (<|>))
+import           Control.Monad       (liftM)
+import           Data.Maybe          (fromMaybe)
 
-import qualified Compiler.Syntax as Syntax
-import qualified Compiler.Type   as Type
-
-tr :: Show a => a -> a
-tr x = trace (show x) x
+import qualified Compiler.Syntax     as Syntax
+import qualified Compiler.Type       as Type
 
 addMetavariables :: Syntax.Program -> Syntax.Program
 addMetavariables p = run (programEnv p) $ updateProgram p
@@ -18,8 +14,10 @@ addMetavariables p = run (programEnv p) $ updateProgram p
 -- and the declarations. The indifect path is the name of the environment
 -- without accounting for new, so it is only different for units. We use the
 -- indirect path to identify units which are primitives.
+
 data Env = Env [Frame]
            deriving (Show)
+
 type Frame = (Type.Path, Type.Path, [(String, Type.Type)], [Syntax.Dec])
 
 programEnv :: Syntax.Program -> Env
@@ -188,12 +186,8 @@ updateTerm t =
                      ty'
                      [(pos, "Unreachable", tys)]
         _ -> do
-          -- _ <- trace ("3 " ++ show q) (return ())
           q' <- convertPath q
-          -- _ <- trace ("4 " ++ show q') (return ())
           (q', ty') <- getFun q'
-          -- _ <- trace ("5 " ++ show q') (return ())
-          -- _ <- trace (show q') (return ())
           return $ Syntax.UpperTerm pos q' ty' q
     Syntax.VariableTerm pos x ->
       return $ Syntax.VariableTerm pos x

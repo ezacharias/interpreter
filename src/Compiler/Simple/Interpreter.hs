@@ -1,4 +1,4 @@
-module Compiler.Interpreter where
+module Compiler.Simple.Interpreter where
 
 import           Data.IntMap     (IntMap)
 import qualified Data.IntMap     as IntMap

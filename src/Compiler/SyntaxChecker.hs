@@ -1,18 +1,20 @@
--- Unbound value variables are detected by the parser.
+-- | Unbound value variables are detected by the parser so we do not need to
+--   keep track of them here.
 --
+--   Type arguments are required in all cases except for paths to functions and
+--   paths to constructors; i.e., type arguments must be provided to modules
+--   and units.
+
 -- Substitions only work for modules and not units because it doesn't really
--- matter how long a path to a unit is and you can always substituto to the
+-- matter how long a path to a unit is and you can always substitute to the
 -- parent module.
 
--- Type arguments are required in all cases except for paths to functions and
--- paths to constructors.
 
 -- Do we check that constructors in bindings are singleton types?
 -- How should we check completeness of case terms?
 -- It seems to me both of these should happen after type-checking.
 
 -- We don't check declaring over builtins.
-
 
 -- We need to check that function patterns have explicit types.
 
@@ -206,7 +208,7 @@ withTypeVariables :: [String] -> M a -> M a
 withTypeVariables vs m =
   with (\ l -> l {boundTypeVariables = vs ++ boundTypeVariables l}) m
 
--- For sub declarations every type variable must be found in the path so we can
+-- | For sub declarations every type variable must be found in the path so we can
 -- replace the substitution without losing any information.
 checkIfAllTypeVariablesAreFoundInPath ::  Syntax.Pos -> Syntax.Path -> [String] -> M ()
 checkIfAllTypeVariablesAreFoundInPath pos q vs = forM_ vs (checkIfTypeVariableIsFoundInPath pos q)
@@ -238,8 +240,9 @@ type Name = (NameType, Focus, Syntax.Pos, String, Arity)
 
 data NameType =
    FunName
-   -- | The number of arguments to a pattern are checked by the syntax checker.
  | ConName Int
+   -- ^ The number of arguments to constructor in a pattern are checked by the
+   --   syntax checker and not the type checker.
  | ModName
  | TypeName
  | UnitName
@@ -254,7 +257,6 @@ data Focus =
 
 -- | Do not do an arity test if arity is Nothing.
 type Arity = Maybe Int
-
 
 checkArity :: Name -> [a] -> M ()
 checkArity (x, _, pos, s, arity) vs =

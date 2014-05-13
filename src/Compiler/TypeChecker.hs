@@ -1,17 +1,14 @@
-{-
-For patterns, we want to analyze the pattern first
-and use the incomplete type information as the
-expected type of the term. To analyze the pattern,
-we must pass an expected type.
-
-We will separate generating pattern bindings from
-actual binding so we can reuse the function.
-
-Take something like a pattern in the for notation.
-It might complete a concrete type. I need to think
-about how to do that.
--}
-
+-- | For patterns, we want to analyze the pattern first
+--   and use the incomplete type information as the
+--   expected type of the term. To analyze the pattern,
+--   we must pass an expected type.
+--
+--   We will separate generating pattern bindings from
+--   actual binding so we can reuse the function.
+--
+--   Take something like a pattern in the for notation.
+--   It might complete a concrete type. I need to think
+--   about how to do that.
 
 module Compiler.TypeChecker where
 
@@ -25,10 +22,9 @@ import qualified Compiler.Syntax as Syntax
 import qualified Compiler.Type   as Type
 
 
--- The program syntax starts out containing type metavariables. It either
--- returns a program with all type metavariables replaced by concrete types or
--- it returns an error string.
-
+-- | The program syntax starts out containing type metavariables. It either
+--   returns a program with all type metavariables replaced by concrete types or
+--   it returns an error string.
 inferProgram :: Syntax.Program -> Either String Syntax.Program
 
 inferProgram (Syntax.Program xs) =
@@ -51,12 +47,6 @@ inferDec (Syntax.FunDec pos ty0s ty0 v vs ps ty t) = do
           case inferTerm g s ty0 t of
             Left msg -> Left msg
             Right t -> Right $ Syntax.FunDec pos ty0s ty0 v vs ps ty t
-{-
-  case inferTerm g sigmaEmpty ty0 t of
-    Left msg -> Left msg
-    Right t -> Right $ Syntax.FunDec pos ty0s ty0 v vs ps ty t
-  where g = either (\ _ -> unreachable "inferDec") id $ gammaWithPats gammaEmpty sigmaEmpty ps ty0s
--}
 
 inferDec (Syntax.ModDec pos s vs ds) =
   case inferDecs ds of
@@ -86,6 +76,9 @@ inferDecs (d:ds) =
         Right ds -> Right (d:ds)
 
 
+-- This seems incorrect. Do we unify here or what?
+
+-- | Adds the local variables in the pattern to gamma.
 gammaWithPat :: Gamma -> Sigma -> Syntax.Pat -> Type.Type -> Either String Gamma
 gammaWithPat g s (Syntax.AscribePat _ _ p _)        ty = gammaWithPat g s p ty
 gammaWithPat g s (Syntax.LowerPat pos n)            ty = gammaWithLowerPat g s pos n ty
@@ -530,8 +523,7 @@ sigmaBind s x ty =
     Just _ -> IntMap.insert x ty s
 
 
--- Table from local variable names to concrete types.
-
+-- | A table from local variable names to concrete types.
 type Gamma = [(String, Type.Type)]
 
 gammaEmpty :: Gamma
