@@ -41,7 +41,7 @@ data Term =
    -- ^ Apply bind closure-ident arg-ident body
  | CallTerm Ident Ident Ident Term
  | CaseTerm Ident Ident [([Ident], Term)] Term
- | CatchTerm Ident Ident Type Term --
+ | CatchTerm Ident Ident Type Term Term --
    -- ^ Catch bind tag result-type body1 body2
  | ConcatenateTerm Ident Ident Ident Term
  | ConstructorTerm Ident Ident Index [Ident] Term
