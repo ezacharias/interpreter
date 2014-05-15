@@ -1,5 +1,6 @@
 -- Let's work on this incrementally.
 --   1. Do nothing but rename.
+--   *. Count the size.
 --   2. Attempt to drop unused instructions.
 --   3. Use values.
 --   4. Attempt to inline the continuation for case.
@@ -12,7 +13,19 @@ module Compiler.Linear.Shrinker where
 import Compiler.Linear
 
 shrink :: Program -> Program
-shrink = undefined
+shrink p = run p $ do
+  xs <- mapM shrinkFun (programFuns p)
+  return $ p {programFuns = xs}
+
+shrinkFun :: (Ident, Fun) -> M (Ident, Fun)
+shrinkFun (d1, Fun d2 ty1 ty2 t1) = do
+  d1' <- renameFun d1
+  d2' <- gen
+  ty1' <- shrinkType ty1
+  ty2' <- shrinkType ty2
+  t1' <- bind d2 d2' $ do
+    shrinkTerm t1
+  return $ (d1', Fun d2' ty1' ty2' t1')
 
 shrinkTerm :: Term -> M Term
 shrinkTerm (ApplyTerm d1 d2 d3 t1) = do
@@ -112,6 +125,9 @@ newtype M a = M { runM :: [(Ident, Ident)] -> (a -> Int -> Program) -> Int -> Pr
 instance Monad M where
   return x = M $ \ _ k -> k x
   m >>= f = M $ \ r k i -> runM m r (\ x i -> runM (f x) r k i) i
+
+run :: Program -> M Program -> Program
+run p m = undefined
 
 bind :: Ident -> Ident -> M a -> M a
 bind d1 d2 m = M $ \ r k i -> runM m ((d1,d2):r) k i
