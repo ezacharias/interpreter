@@ -35,13 +35,13 @@ shrinkTerm (ApplyTerm d1 d2 d3 t1) = do
   t1' <- bind d1 d1' $ do
     shrinkTerm t1
   return $ ApplyTerm d1' d2' d3' t1'
-shrinkTerm (CallTerm d1 d2 d3 t1) = do
+shrinkTerm (CallTerm d1 d2 d3s t1) = do
   d1' <- gen
   d2' <- renameFun d2
-  d3' <- rename d3
+  d3s' <- mapM rename d3s
   t1' <- bind d1 d1' $ do
     shrinkTerm t1
-  return $ CallTerm d1' d2' d3' t1'
+  return $ CallTerm d1' d2' d3s' t1'
 shrinkTerm (CaseTerm d1 d2 c1s t1) = do
   d1' <- gen
   d2' <- rename d2

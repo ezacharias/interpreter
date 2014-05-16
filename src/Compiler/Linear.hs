@@ -39,7 +39,7 @@ data Type = ArrowType Type Type
 data Term =
    ApplyTerm Ident Ident Ident Term
    -- ^ Apply bind closure-ident arg-ident body
- | CallTerm Ident Ident Ident Term
+ | CallTerm Ident Ident [Ident] Term
  | CaseTerm Ident Ident [([Ident], Term)] Term
  | CatchTerm Ident Ident Type Term Term --
    -- ^ Catch bind tag result-type body1 body2
