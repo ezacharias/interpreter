@@ -1,8 +1,10 @@
 -- | Converts a program from Simple to Linear.
 module Compiler.Linear.Converter where
 
-import qualified Compiler.Simple as Simple
+import           Data.Maybe      (fromMaybe)
+
 import qualified Compiler.Linear as Linear
+import qualified Compiler.Simple as Simple
 
 convert :: Simple.Program -> Linear.Program
 convert p = run p $ do
@@ -20,15 +22,26 @@ convert p = run p $ do
              }
 
 run :: Simple.Program -> M Linear.Program Linear.Program -> Linear.Program
-run p m = runM m k1 k2
+run p m = runM m k1 k2 s [] 0
   where k1 x k2 = k2 x
-        k2 x = x
+        k2 x _ = x
+        s = S { tagRenames = zip (map fst (Simple.programTags p)) [0..]
+              , sumRenames = zip (map fst (Simple.programSums p)) [0..]
+              , funRenames = zip (map fst (Simple.programFuns p)) [0..]
+              }
 
 convertTag :: (Simple.Ident, Simple.Tag) -> P (Linear.Ident, Linear.Tag)
-convertTag = todo "convertTag"
+convertTag (d1, Simple.Tag ty1 ty2) = do
+  d1' <- renameTag d1
+  ty1' <- convertType ty1
+  ty2' <- convertType ty2
+  return (d1', Linear.Tag ty1' ty2')
 
 convertSum :: (Simple.Ident, Simple.Sum) -> P (Linear.Ident, Linear.Sum)
-convertSum = todo "convertSum"
+convertSum (d1, Simple.Sum ty1ss) = do
+  d1' <- renameSum d1
+  ty1ss' <- mapM (mapM convertType) ty1ss
+  return (d1', Linear.Sum ty1ss')
 
 convertFun :: (Simple.Ident, Simple.Fun) -> P (Linear.Ident, Linear.Fun)
 convertFun (d1, Simple.Fun ty1 t1) = do
@@ -81,7 +94,7 @@ convertTerm (Simple.FunTerm d1) = do
 convertTerm (Simple.LambdaTerm d1 ty1 t1) = do
   d1' <- gen
   d2' <- gen
-  ty1' <- undefined
+  ty1' <- convertType ty1
   t1' <- result $ bind d1 d1' (convertTerm t1)
   continue d2' $ \ t2' -> do
     return $ Linear.LambdaTerm d2' d1' ty1' t1' t2'
@@ -122,7 +135,22 @@ convertRule (d1s, t1) = do
   return (d1s', t1')
 
 convertType :: Simple.Type -> M a Linear.Type
-convertType = undefined
+convertType ty =
+  case ty of
+    Simple.ArrowType ty1 ty2 -> do
+      ty1' <- convertType ty1
+      ty2' <- convertType ty2
+      return $ Linear.ArrowType ty1' ty2'
+    Simple.StringType ->
+      return $ Linear.StringType
+    Simple.TupleType tys -> do
+      tys' <- mapM convertType tys
+      return $ Linear.TupleType tys'
+    Simple.UnitType ->
+      return $ Linear.TupleType []
+    Simple.SumType d1 -> do
+      d1' <- renameSum d1
+      return $ Linear.SumType d1'
 
 convertTerms :: [Simple.Term] -> T [Linear.Ident]
 convertTerms [] = do
@@ -132,47 +160,72 @@ convertTerms (t:ts) = do
   ds <- convertTerms ts
   return $ d:ds
 
-newtype M a b = N { runM :: (b -> (a -> Linear.Program) -> Linear.Program) -> (a -> Linear.Program) -> Linear.Program }
+newtype M a b = N { runM :: (b -> (a -> Int -> Linear.Program) -> Int -> Linear.Program)
+                         -> (a -> Int -> Linear.Program)
+                         -> S
+                         -> [(Simple.Ident, Linear.Ident)]
+                         -> Int
+                         -> Linear.Program }
+
+data S = S
+ { tagRenames :: [(Simple.Ident, Linear.Ident)]
+ , sumRenames :: [(Simple.Ident, Linear.Ident)]
+ , funRenames :: [(Simple.Ident, Linear.Ident)]
+ }
 
 type P a = M Linear.Program a
 
 type T a = M Linear.Term a
 
 instance Monad (M a) where
-  return x = N $ \ k1 k2 -> k1 x k2
-  m >>= f = N $ \ k1 k2 -> runM m (\ x k2 -> runM (f x) k1 k2) k2
+  return x = N $ \ k1 k2 _ _ -> k1 x k2
+  m >>= f = N $ \ k1 k2 s r -> runM m (\ x k2 -> runM (f x) k1 k2 s r) k2 s r
 
 gen :: M a Linear.Ident
-gen = undefined
+gen = N $ \ k1 k2 _ _ n -> k1 n k2 (n + 1)
+
+getState :: M a S
+getState = N $ \ k1 k2 s _ -> k1 s k2
 
 renameTag :: Simple.Ident -> M a Linear.Ident
-renameTag d = return d
+renameTag d = do
+  s <- getState
+  return $ fromMaybe (unreachable "renameTag") (lookup d (tagRenames s))
 
 renameFun :: Simple.Ident -> M a Linear.Ident
-renameFun d = return d
+renameFun d = do
+  s <- getState
+  return $ fromMaybe (unreachable "renameFun") (lookup d (funRenames s))
 
 renameSum :: Simple.Ident -> M a Linear.Ident
-renameSum d = return d
+renameSum d = do
+  s <- getState
+  return $ fromMaybe (unreachable "renameSum") (lookup d (sumRenames s))
+
+getRenames :: M a [(Simple.Ident, Linear.Ident)]
+getRenames = N $ \ k1 k2 _ r -> k1 r k2
 
 rename :: Simple.Ident -> M a Linear.Ident
-rename = undefined
+rename d = do
+  r <- getRenames
+  return $ fromMaybe (unreachable "rename") (lookup d r)
 
 bind :: Simple.Ident -> Linear.Ident -> M a b -> M a b
-bind d1 d2 m = undefined
+bind d1 d2 m = N $ \ k1 k2 s r -> runM m k1 k2 s ((d1,d2):r)
 
 binds :: [Simple.Ident] -> [Linear.Ident] -> M a b -> M a b
 binds [] [] m = m
 binds (d1:d1s) (d2:d2s) m = bind d1 d2 $ binds d1s d2s m
-binds _ _ _ = error "binds"
+binds _ _ _ = unreachable "binds"
 
 continue :: Linear.Ident -> (Linear.Term -> T Linear.Term) -> T Linear.Ident
-continue d f = N $ \ k1 k2 -> k1 d (\ t -> runM (f t) (\ t k2 -> k2 t) k2)
+continue d f = N $ \ k1 k2 s r -> k1 d (\ t -> runM (f t) (\ t k2 -> k2 t) k2 s r)
 
 adjust :: T Linear.Ident -> (Linear.Term -> Linear.Term) -> T Linear.Ident
 adjust m f = N $ \ k1 k2 -> runM m k1 (\ t -> k2 (f t))
 
 escape :: Linear.Term -> T Linear.Ident
-escape t = N $ \ k1 k2 -> k2 t
+escape t = N $ \ k1 k2 _ _ -> k2 t
 
 result :: T Simple.Ident -> M a Linear.Term
 result m = N $ \ k1 k2 -> runM m (\ d1 k2 -> k2 (Linear.ReturnTerm d1)) (\ t1 -> k1 t1 k2)
