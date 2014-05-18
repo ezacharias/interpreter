@@ -13,12 +13,17 @@ module Compiler.Linear.Shrinker where
 import Compiler.Linear
 
 shrink :: Program -> Program
+shrink p = p
+
+{-
+
+shrink :: Program -> Program
 shrink p = run p $ do
   xs <- mapM shrinkFun (programFuns p)
   return $ p {programFuns = xs}
 
 shrinkFun :: (Ident, Fun) -> M (Ident, Fun)
-shrinkFun (d1, Fun d2 ty1 ty2 t1) = do
+shrinkFun (d1, Fun d2 ty1s ty2 t1) = do
   d1' <- renameFun d1
   d2' <- gen
   ty1' <- shrinkType ty1
@@ -153,3 +158,5 @@ renameFun d1 = return d1
 
 renameTag :: Ident -> M Ident
 renameTag d1 = return d1
+
+-}

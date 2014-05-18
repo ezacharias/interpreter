@@ -24,10 +24,7 @@ data Tag = Tag Type Type
 data Sum = Sum [[Type]]
            deriving (Eq, Ord, Show)
 
--- Functions are actually called with no arguments. Hence, they are just a
--- return type and a term. To take an argument, the term returns a lambda
--- expression.
-data Fun = Fun Ident Type Type Term
+data Fun = Fun [Ident] [Type] Type Term
            deriving (Eq, Ord, Show)
 
 data Type = ArrowType Type Type

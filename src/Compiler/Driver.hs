@@ -16,6 +16,8 @@ import qualified Compiler.Direct.Check       as Direct.Check
 import qualified Compiler.Direct.Converter   as Direct.Converter
 import qualified Compiler.Direct.Interpreter as Direct.Interpreter
 import qualified Compiler.Elaborator         as Elaborator
+import qualified Compiler.Linear             as Linear
+import qualified Compiler.Linear.Converter   as Linear.Converter
 import qualified Compiler.Meta               as Meta
 import           Compiler.Parser
 import qualified Compiler.Simple             as Simple
@@ -51,9 +53,12 @@ interpreter = parse         >=> strict
           >=> syntaxCheck   >=> strict
           >=> typeCheck     >=> strict
           >=> elaborate     >=> strict >=> simpleCheck
+          >=> linearConvert >=> strict >=> return (error "done")
+          {-
           >=> cpsConvert    >=> strict >=> cpsCheck
           >=> directConvert >=> strict >=> directCheck
           >=> directInterpret
+          -}
 
 -- | Takes a filename and outputs C code to file stdout.
 compiler :: String -> Driver ()
@@ -130,6 +135,9 @@ simpleInterpret p = check $ Simple.Interpreter.interpret p
         check (Simple.Interpreter.EscapeStatus _ _) = DriverError "interpreter resulted in an uncaught throw"
         check Simple.Interpreter.UndefinedStatus    = DriverError "interpreter resulted in unreachable"
         check (Simple.Interpreter.WriteStatus s x)  = liftIO (putStrLn s) >> check x
+
+linearConvert :: Simple.Program -> Driver Linear.Program
+linearConvert x = return $ Linear.Converter.convert x
 
 cpsConvert :: Simple.Program -> Driver CPS.Program
 cpsConvert x = return $ CPS.Convert.convert x

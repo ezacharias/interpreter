@@ -1,21 +1,43 @@
+-- | Converts a program from Simple to Linear.
 module Compiler.Linear.Converter where
 
 import qualified Compiler.Simple as Simple
 import qualified Compiler.Linear as Linear
 
 convert :: Simple.Program -> Linear.Program
-convert = undefined
+convert p = run p $ do
+  xs1 <- mapM convertTag (Simple.programTags p)
+  xs2 <- mapM convertType (Simple.programRess p)
+  xs3 <- mapM convertSum (Simple.programSums p)
+  xs4 <- mapM convertFun (Simple.programFuns p)
+  d <- renameFun (Simple.programMain p)
+  return $ Linear.Program
+             { Linear.programTags = xs1
+             , Linear.programRess = xs2
+             , Linear.programSums = xs3
+             , Linear.programFuns = xs4
+             , Linear.programMain = d
+             }
 
-convertFun :: (Simple.Ident, Simple.Fun) -> M Simple.Fun
+run :: Simple.Program -> M Linear.Program Linear.Program -> Linear.Program
+run p m = runM m k1 k2
+  where k1 x k2 = k2 x
+        k2 x = x
+
+convertTag :: (Simple.Ident, Simple.Tag) -> P (Linear.Ident, Linear.Tag)
+convertTag = todo "convertTag"
+
+convertSum :: (Simple.Ident, Simple.Sum) -> P (Linear.Ident, Linear.Sum)
+convertSum = todo "convertSum"
+
+convertFun :: (Simple.Ident, Simple.Fun) -> P (Linear.Ident, Linear.Fun)
 convertFun (d1, Simple.Fun ty1 t1) = do
-  t1' <- result (convertTerm t1) $ \ d1 -> do
-    return $ Linear.ReturnTerm d1
-  undefined
+  d1' <- renameFun d1
+  ty' <- convertType ty1
+  t1' <- result $ convertTerm t1
+  return (d1', Linear.Fun [] [] ty' t1')
 
-gen :: M Linear.Ident
-gen = undefined
-
-convertTerm :: Simple.Term -> M Simple.Ident
+convertTerm :: Simple.Term -> T Simple.Ident
 convertTerm (Simple.ApplyTerm t1 t2) = do
   d1' <- convertTerm t1
   d2' <- convertTerm t2
@@ -35,7 +57,7 @@ convertTerm (Simple.CaseTerm t1 c1s) = do
 convertTerm (Simple.CatchTerm d1 _ ty1 t1) = do
   d1' <- renameTag d1
   ty1' <- convertType ty1
-  t2' <- result (convertTerm t1) (\ d -> return $ Linear.ReturnTerm d)
+  t2' <- result $ convertTerm t1
   d2' <- gen
   continue d2' $ \ t3' -> do
     return $ Linear.CatchTerm d2' d1' ty1' t2' t3'
@@ -60,7 +82,7 @@ convertTerm (Simple.LambdaTerm d1 ty1 t1) = do
   d1' <- gen
   d2' <- gen
   ty1' <- undefined
-  t1' <- result (bind d1 d1' (convertTerm t1)) (\ d -> return $ Linear.ReturnTerm d)
+  t1' <- result $ bind d1 d1' (convertTerm t1)
   continue d2' $ \ t2' -> do
     return $ Linear.LambdaTerm d2' d1' ty1' t1' t2'
 convertTerm (Simple.StringTerm x) = do
@@ -93,16 +115,16 @@ convertTerm (Simple.UntupleTerm d1s t1 t2) = do
 convertTerm (Simple.VariableTerm d1) = do
   rename d1
 
-convertRule :: ([Simple.Ident], Simple.Term) -> M ([Linear.Ident], Linear.Term)
+convertRule :: ([Simple.Ident], Simple.Term) -> T ([Linear.Ident], Linear.Term)
 convertRule (d1s, t1) = do
   d1s' <- mapM (const gen) d1s
-  t1' <- result (binds d1s d1s' $ convertTerm t1) (\ d -> return $ Linear.ReturnTerm d)
+  t1' <- result $ binds d1s d1s' (convertTerm t1)
   return (d1s', t1')
 
-convertType :: Simple.Type -> M Linear.Type
+convertType :: Simple.Type -> M a Linear.Type
 convertType = undefined
 
-convertTerms :: [Simple.Term] -> M [Linear.Ident]
+convertTerms :: [Simple.Term] -> T [Linear.Ident]
 convertTerms [] = do
   return []
 convertTerms (t:ts) = do
@@ -110,40 +132,55 @@ convertTerms (t:ts) = do
   ds <- convertTerms ts
   return $ d:ds
 
-rename :: Simple.Ident -> M Linear.Ident
+newtype M a b = N { runM :: (b -> (a -> Linear.Program) -> Linear.Program) -> (a -> Linear.Program) -> Linear.Program }
+
+type P a = M Linear.Program a
+
+type T a = M Linear.Term a
+
+instance Monad (M a) where
+  return x = N $ \ k1 k2 -> k1 x k2
+  m >>= f = N $ \ k1 k2 -> runM m (\ x k2 -> runM (f x) k1 k2) k2
+
+gen :: M a Linear.Ident
+gen = undefined
+
+renameTag :: Simple.Ident -> M a Linear.Ident
+renameTag d = return d
+
+renameFun :: Simple.Ident -> M a Linear.Ident
+renameFun d = return d
+
+renameSum :: Simple.Ident -> M a Linear.Ident
+renameSum d = return d
+
+rename :: Simple.Ident -> M a Linear.Ident
 rename = undefined
 
-renameTag :: Simple.Ident -> M Linear.Ident
-renameTag = undefined
-
-renameFun :: Simple.Ident -> M Linear.Ident
-renameFun = undefined
-
-renameSum :: Simple.Ident -> M Linear.Ident
-renameSum = undefined
-
-bind :: Simple.Ident -> Linear.Ident -> M Simple.Ident -> M Linear.Ident
+bind :: Simple.Ident -> Linear.Ident -> M a b -> M a b
 bind d1 d2 m = undefined
 
-binds :: [Simple.Ident] -> [Linear.Ident] -> M Simple.Ident -> M Linear.Ident
-binds = undefined
+binds :: [Simple.Ident] -> [Linear.Ident] -> M a b -> M a b
+binds [] [] m = m
+binds (d1:d1s) (d2:d2s) m = bind d1 d2 $ binds d1s d2s m
+binds _ _ _ = error "binds"
 
-continue :: Linear.Ident -> (Linear.Term -> M Linear.Term) -> M Linear.Ident
-continue d f = N $ \ k1 k2 -> k1 d (\ t -> runN (f t) (\ t k2 -> k2 t) k2)
+continue :: Linear.Ident -> (Linear.Term -> T Linear.Term) -> T Linear.Ident
+continue d f = N $ \ k1 k2 -> k1 d (\ t -> runM (f t) (\ t k2 -> k2 t) k2)
 
-adjust :: M Linear.Ident -> (Linear.Term -> Linear.Term) -> M Linear.Ident
-adjust m f = N $ \ k1 k2 -> runN m k1 (\ t -> k2 (f t))
+adjust :: T Linear.Ident -> (Linear.Term -> Linear.Term) -> T Linear.Ident
+adjust m f = N $ \ k1 k2 -> runM m k1 (\ t -> k2 (f t))
 
-escape :: Linear.Term -> M Linear.Ident
+escape :: Linear.Term -> T Linear.Ident
 escape t = N $ \ k1 k2 -> k2 t
 
-result :: M Simple.Ident -> (Linear.Ident -> M Linear.Term) -> M Linear.Term
-result m f = N $ \ k1 k2 -> runN m (\ d1 k2 -> runN (f d1) (\ t1 k2 -> k2 t1) k2) k2
+result :: T Simple.Ident -> M a Linear.Term
+result m = N $ \ k1 k2 -> runM m (\ d1 k2 -> k2 (Linear.ReturnTerm d1)) (\ t1 -> k1 t1 k2)
 
-newtype N a b = N { runN :: (b -> (a -> M Simple.Program) -> M Simple.Program) -> (a -> M Simple.Program) -> M Simple.Program }
+-- Utility Functions
 
-type M a = N Linear.Term a
+todo :: String -> a
+todo s = error $ "todo: Linear.Converter." ++ s
 
-instance Monad (N a) where
-  return x = N $ \ k1 k2 -> k1 x k2
-  m >>= f = N $ \ k1 k2 -> runN m (\ x k2 -> runN (f x) k1 k2) k2
+unreachable :: String -> a
+unreachable s = error $ "unreachable: Linear.Converter." ++ s
