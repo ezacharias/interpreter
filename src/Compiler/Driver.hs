@@ -9,7 +9,7 @@ import           System.IO
 import qualified Compiler.C.Converter        as C.Converter
 import qualified Compiler.CPS                as CPS
 import qualified Compiler.CPS.Check          as CPS.Check
-import qualified Compiler.CPS.Convert        as CPS.Convert
+import qualified Compiler.CPS.FromLinear        as CPS.FromLinear
 import qualified Compiler.CPS.Interpreter    as Interpreter
 import qualified Compiler.Direct             as Direct
 import qualified Compiler.Direct.Check       as Direct.Check
@@ -53,13 +53,14 @@ interpreter = parse         >=> strict
           >=> syntaxCheck   >=> strict
           >=> typeCheck     >=> strict
           >=> elaborate     >=> strict >=> simpleCheck
-          >=> linearConvert >=> strict >=> return (error "done")
+          >=> linearConvert >=> strict
+          >=> cpsConvert    >=> strict >=> cpsCheck >=> return (error "done")
           {-
-          >=> cpsConvert    >=> strict >=> cpsCheck
           >=> directConvert >=> strict >=> directCheck
           >=> directInterpret
           -}
 
+{-
 -- | Takes a filename and outputs C code to file stdout.
 compiler :: String -> Driver ()
 compiler = parse
@@ -69,6 +70,7 @@ compiler = parse
        >=> cpsConvert    >=> strict >=> cpsCheck
        >=> directConvert >=> strict >=> directCheck
        >=> cConvert
+-}
 
 -- | Writes the value to stdout to make sure it is fully evaluated at this point.
 strict :: Show a => a -> Driver a
@@ -139,8 +141,8 @@ simpleInterpret p = check $ Simple.Interpreter.interpret p
 linearConvert :: Simple.Program -> Driver Linear.Program
 linearConvert x = return $ Linear.Converter.convert x
 
-cpsConvert :: Simple.Program -> Driver CPS.Program
-cpsConvert x = return $ CPS.Convert.convert x
+cpsConvert :: Linear.Program -> Driver CPS.Program
+cpsConvert x = return $ CPS.FromLinear.convert x
 
 cpsCheck :: CPS.Program -> Driver CPS.Program
 cpsCheck x = check $ CPS.Check.check x
